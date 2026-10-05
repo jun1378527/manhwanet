@@ -1,0 +1,117 @@
+package com.manhwanet.global.error;
+
+import com.manhwanet.global.response.ApiError;
+import com.manhwanet.global.response.ApiResponse;
+import jakarta.validation.ConstraintViolationException;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
+
+/**
+ * 모든 예외를 공통 응답 형식(ApiResponse)으로 변환한다.
+ */
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException e) {
+        log.debug("Business exception: code={}, message={}", e.getErrorCode(), e.getMessage());
+        return toResponse(e.getErrorCode(), e.getMessage(), List.of());
+    }
+
+    /** @RequestBody @Valid 검증 실패 */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodArgumentNotValid(MethodArgumentNotValidException e) {
+        List<ApiError.FieldError> fieldErrors = e.getBindingResult().getFieldErrors().stream()
+                .map(error -> new ApiError.FieldError(error.getField(), error.getDefaultMessage()))
+                .toList();
+        return toResponse(ErrorCode.INVALID_INPUT, fieldErrors);
+    }
+
+    /** @RequestParam, @PathVariable 등 메서드 파라미터 제약 조건 검증 실패 */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleHandlerMethodValidation(HandlerMethodValidationException e) {
+        List<ApiError.FieldError> fieldErrors = e.getParameterValidationResults().stream()
+                .flatMap(result -> result.getResolvableErrors().stream()
+                        .map(error -> new ApiError.FieldError(
+                                result.getMethodParameter().getParameterName(),
+                                error.getDefaultMessage())))
+                .toList();
+        return toResponse(ErrorCode.INVALID_INPUT, fieldErrors);
+    }
+
+    /** @Validated 가 선언된 Bean 의 메서드 검증 실패 */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConstraintViolation(ConstraintViolationException e) {
+        List<ApiError.FieldError> fieldErrors = e.getConstraintViolations().stream()
+                .map(violation -> new ApiError.FieldError(
+                        violation.getPropertyPath().toString(),
+                        violation.getMessage()))
+                .toList();
+        return toResponse(ErrorCode.INVALID_INPUT, fieldErrors);
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        return toResponse(ErrorCode.INVALID_INPUT,
+                List.of(new ApiError.FieldError(e.getName(), "요청 값의 타입이 올바르지 않습니다.")));
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingParameter(MissingServletRequestParameterException e) {
+        return toResponse(ErrorCode.INVALID_INPUT,
+                List.of(new ApiError.FieldError(e.getParameterName(), "필수 파라미터가 누락되었습니다.")));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotReadable(HttpMessageNotReadableException e) {
+        return toResponse(ErrorCode.INVALID_INPUT, "요청 본문을 읽을 수 없습니다.", List.of());
+    }
+
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<ApiResponse<Void>> handleNotFound(Exception e) {
+        return toResponse(ErrorCode.RESOURCE_NOT_FOUND, List.of());
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        return toResponse(ErrorCode.METHOD_NOT_ALLOWED, List.of());
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException e) {
+        return toResponse(ErrorCode.UNSUPPORTED_MEDIA_TYPE, List.of());
+    }
+
+    /** 처리되지 않은 예외. 내부 정보는 응답에 노출하지 않고 로그로만 남긴다. */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception e) {
+        log.error("Unexpected exception", e);
+        return toResponse(ErrorCode.INTERNAL_SERVER_ERROR, List.of());
+    }
+
+    private ResponseEntity<ApiResponse<Void>> toResponse(ErrorCode errorCode, List<ApiError.FieldError> fieldErrors) {
+        return toResponse(errorCode, errorCode.getMessage(), fieldErrors);
+    }
+
+    private ResponseEntity<ApiResponse<Void>> toResponse(
+            ErrorCode errorCode, String message, List<ApiError.FieldError> fieldErrors) {
+        return ResponseEntity
+                .status(errorCode.getStatus())
+                .body(ApiResponse.failure(ApiError.of(errorCode, message, fieldErrors)));
+    }
+}

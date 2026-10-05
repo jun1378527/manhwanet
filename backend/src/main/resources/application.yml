@@ -1,0 +1,25 @@
+# 공통 설정. DB 접속 정보는 환경변수로만 주입한다. (비밀번호 기본값 없음)
+spring:
+  application:
+    name: manhwanet
+  profiles:
+    default: local
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:manhwanet}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # 스키마는 Flyway가 관리한다. Hibernate는 엔티티와 스키마 일치 여부만 검증한다.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}

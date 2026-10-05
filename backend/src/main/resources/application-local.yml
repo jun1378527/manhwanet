@@ -1,0 +1,6 @@
+# 로컬 개발 프로필 (기본 활성 프로필)
+# 저장소 루트의 .env 파일이 있으면 읽어 온다. OS 환경변수가 .env 보다 우선한다.
+# 경로는 실행 디렉터리 기준이므로 backend/ 디렉터리에서 실행한다.
+spring:
+  config:
+    import: optional:file:../.env[.properties]

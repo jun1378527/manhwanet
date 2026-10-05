@@ -1,0 +1,26 @@
+# 로컬 개발용 PostgreSQL
+# 접속 정보는 저장소 루트의 .env 파일에서 읽는다. (.env.example 참고)
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: manhwanet-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-manhwanet}
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required. Copy .env.example to .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required. Copy .env.example to .env}
+      TEST_DB_NAME: ${TEST_DB_NAME:-manhwanet_test}
+      TZ: UTC
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
