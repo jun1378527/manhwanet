@@ -1,5 +1,7 @@
 package com.manhwanet.support;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -14,7 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 /**
- * 등록 API 호출 헬퍼 (AdminApiIntegrationTest 에서 사용).
+ * 등록 API 호출 헬퍼 (AdminApiIntegrationTest 에서 사용). ADMIN 사용자 + 유효한 CSRF 토큰으로 요청한다.
  */
 public final class ApiFixtures {
 
@@ -28,6 +30,8 @@ public final class ApiFixtures {
 
     public ResultActions postJson(String path, Object body) throws Exception {
         return mockMvc.perform(post(path)
+                .with(user("admin@manhwanet.test").roles("ADMIN"))
+                .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)));
     }

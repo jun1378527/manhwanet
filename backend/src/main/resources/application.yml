@@ -23,9 +23,26 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      # 서버 메모리 세션, 유휴 만료 30분 (remember-me 없음)
+      timeout: 30m
+      # URL 에 세션 ID 를 붙이지 않는다.
+      tracking-modes: cookie
+      cookie:
+        # 운영 기본값. __Host- 접두사는 Secure, Path=/, Domain 없음을 브라우저가 강제한다.
+        # local 프로필은 HTTP 개발용으로 이름과 Secure 를 바꾼다. (application-local.yml)
+        name: __Host-MANHWANET_SESSION
+        http-only: true
+        secure: true
+        same-site: lax
+        path: /
 
 manhwanet:
-  admin-api:
-    # 등록(관리자) API 활성화 여부. local 프로필 + true 일 때만 등록 Controller 가 생성된다.
-    # 관리자 인증을 대신하지 않는다. (docs/work-creator-spec.md 6.1)
-    enabled: false
+  auth:
+    login-limit:
+      # 개발 단계 기본값: 이메일 키당 15분 내 5회 실패 → 15분 거절. 서버 메모리, 최대 10,000개 키.
+      max-failures: 5
+      window: 15m
+      lock-duration: 15m
+      max-entries: 10000

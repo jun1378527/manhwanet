@@ -7,14 +7,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ErrorCode;
+import com.manhwanet.global.security.AuthenticationConfig;
+import com.manhwanet.global.security.WebSecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(HealthController.class)
+@Import({AuthenticationConfig.class, WebSecurityConfig.class})
 class HealthControllerTest {
+
+    /** 보안 설정이 요구하는 Bean (슬라이스 테스트에는 user 도메인이 없다) */
+    @MockitoBean
+    private UserDetailsService userDetailsService;
 
     @Autowired
     private MockMvc mockMvc;

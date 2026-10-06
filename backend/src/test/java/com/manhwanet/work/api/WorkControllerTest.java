@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,6 +15,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.response.PageResponse;
+import com.manhwanet.global.security.AuthenticationConfig;
+import com.manhwanet.global.security.WebSecurityConfig;
 import com.manhwanet.work.application.WorkService;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -21,14 +25,21 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(WorkController.class)
+@Import({AuthenticationConfig.class, WebSecurityConfig.class})
 class WorkControllerTest {
+
+    /** 보안 설정이 요구하는 Bean (슬라이스 테스트에는 user 도메인이 없다) */
+    @MockitoBean
+    private UserDetailsService userDetailsService;
 
     @Autowired
     private MockMvc mockMvc;
@@ -106,7 +117,19 @@ class WorkControllerTest {
 
     @Test
     void adminControllerIsNotPartOfPublicController() throws Exception {
-        mockMvc.perform(post("/api/v1/admin/works").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        mockMvc.perform(post("/api/v1/admin/works")
+                        .with(user("admin@manhwanet.test").roles("ADMIN"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void publicReadIsAllowedAnonymouslyAndUnexpectedErrorIsNotMaskedAsAuthError() throws Exception {
+        given(workService.getWorks(any())).willThrow(new IllegalStateException("boom"));
+
+        mockMvc.perform(get("/api/v1/works"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error.code").value("INTERNAL_SERVER_ERROR"));
     }
 }

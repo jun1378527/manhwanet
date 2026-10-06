@@ -1,6 +1,7 @@
 package com.manhwanet;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -46,11 +47,41 @@ class ManhwanetApplicationTests {
                 .andExpect(jsonPath("$.data.database").value("UP"));
     }
 
+    /**
+     * 인증 도입 후 공개 경로 외에는 기본 거부한다. 없는 경로라도 익명은 401, 로그인 사용자는 404 를 받는다.
+     * (이전 테스트는 익명 요청이 404 를 받는지 검증했다)
+     */
     @Test
-    void unknownPathReturnsNotFoundInCommonFormat() throws Exception {
-        mockMvc.perform(get("/api/v1/not-existing-path"))
+    void unknownPathReturnsNotFoundInCommonFormatForAuthenticatedUser() throws Exception {
+        mockMvc.perform(get("/api/v1/not-existing-path").with(user("user@manhwanet.test").roles("USER")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void unknownNonPublicPathRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/v1/not-existing-path"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void missingResourceOnPublicPathStillReturnsNotFound() throws Exception {
+        mockMvc.perform(get("/api/v1/works/999999999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("WORK_NOT_FOUND"));
+        mockMvc.perform(get("/api/v1/creators/999999999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("CREATOR_NOT_FOUND"));
+    }
+
+    @Test
+    void v3MigrationIsApplied() {
+        Integer appliedCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '3' AND success = TRUE",
+                Integer.class);
+
+        assertThat(appliedCount).isEqualTo(1);
     }
 }

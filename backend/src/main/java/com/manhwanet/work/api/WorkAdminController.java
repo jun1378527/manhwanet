@@ -1,6 +1,5 @@
 package com.manhwanet.work.api;
 
-import com.manhwanet.global.config.ConditionalOnAdminApiEnabled;
 import com.manhwanet.global.config.WebConfig;
 import com.manhwanet.global.response.ApiResponse;
 import com.manhwanet.work.application.WorkService;
@@ -17,11 +16,10 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /**
  * 작품 등록 API. POST /api/v1/admin/works
- * 인증 구현 전에는 local 프로필 + manhwanet.admin-api.enabled=true 일 때만 등록된다.
+ * ADMIN 권한이 필요하다 (WebSecurityConfig: /api/v1/admin/** → hasRole("ADMIN")).
  */
 @RestController
 @RequestMapping("/admin/works")
-@ConditionalOnAdminApiEnabled
 public class WorkAdminController {
 
     private final WorkService workService;

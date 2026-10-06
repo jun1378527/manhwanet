@@ -6,6 +6,7 @@ import jakarta.validation.ConstraintViolationException;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -31,6 +32,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException e) {
         log.debug("Business exception: code={}, message={}", e.getErrorCode(), e.getMessage());
         return toResponse(e.getErrorCode(), e.getMessage(), List.of());
+    }
+
+    /** 요청 제한(429). Retry-After 헤더를 함께 보낸다. */
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTooManyRequests(TooManyRequestsException e) {
+        return ResponseEntity
+                .status(e.getErrorCode().getStatus())
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
+                .body(ApiResponse.failure(ApiError.of(e.getErrorCode(), e.getMessage(), List.of())));
     }
 
     /** 서비스 계층 입력 검증 실패 (정규화가 필요한 규칙, 존재하지 않는 참조 등) */

@@ -307,6 +307,8 @@ GET /api/v1/works?page=0&size=20&sort=createdAt,desc
 
 ### 6.1 등록 API 노출 조건 (인증 구현 전)
 
+> **대체됨 (회원·인증 구현):** 아래 조건부 등록(`@ConditionalOnAdminApiEnabled`, `manhwanet.admin-api.enabled`)은 제거되었습니다. 등록 API는 항상 등록되며 ADMIN 로그인과 CSRF 토큰이 필요합니다. 현재 규칙은 [auth-design-draft.md](auth-design-draft.md) §4를 따릅니다. 아래 내용은 이력으로 남깁니다.
+
 등록 Controller(`WorkAdminController`, `CreatorAdminController`)에는 `@ConditionalOnAdminApiEnabled`가 붙어 있습니다. 아래 **두 조건이 모두** 충족될 때만 Bean으로 등록됩니다.
 
 1. `local` 프로필이 활성화되어 있음

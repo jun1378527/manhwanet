@@ -134,23 +134,33 @@ DB에 연결할 수 없으면 `503`과 `{"success":false,"error":{"code":"SERVIC
 
 - `local` 프로필은 서버를 **loopback 주소(127.0.0.1)에만 바인딩**합니다. 같은 PC에서 `http://localhost:8080`으로 접속합니다.
 
-#### 등록(관리자) API 켜기 — 로컬 전용
+#### 회원·인증과 관리자 계정
 
-인증이 구현되기 전까지 등록 API(`/api/v1/admin/**`)는 **`local` 프로필 + `manhwanet.admin-api.enabled=true`** 일 때만 생성됩니다. 기본값은 false이며, 조회 API는 항상 동작합니다.
+이메일·비밀번호 로그인(서버 세션 쿠키)과 CSRF 보호가 적용되어 있습니다. 등록 API(`/api/v1/admin/**`)는 **ADMIN 계정으로 로그인**해야 호출할 수 있습니다. 상세 규칙은 [docs/auth-design-draft.md](docs/auth-design-draft.md)(확정 명세)를 참고하세요.
 
-```bash
-MANHWANET_ADMIN_API_ENABLED=true ./gradlew bootRun                    # macOS / Linux / Git Bash
-$env:MANHWANET_ADMIN_API_ENABLED="true"; .\gradlew.bat bootRun        # Windows PowerShell
+관리자 계정은 웹 서버와 별도인 생성 명령으로 만듭니다. 이 명령은 웹 서버를 띄우지 않고, 일반 실행 시에는 동작하지 않습니다.
+
+```powershell
+cd backend
+.\gradlew.bat bootJar
+java -jar build\libs\manhwanet-0.0.1-SNAPSHOT.jar --spring.profiles.active=local,admin-cli --manhwanet.admin-cli.email=admin@example.com
+# 콘솔에 비밀번호를 두 번 입력합니다(화면에 표시되지 않음, 15~128자).
 ```
 
-```bash
-curl -X POST http://localhost:8080/api/v1/admin/creators -H "Content-Type: application/json" -d '{"name":"한서윤"}'
-curl -X POST http://localhost:8080/api/v1/admin/works -H "Content-Type: application/json" \
-  -d '{"workFormat":"WEBTOON","titles":[{"title":"달빛 기사단","languageCode":"ko","primary":true}],"creators":[{"creatorId":1,"role":"STORY"}]}'
-curl "http://localhost:8080/api/v1/works?page=0&size=20&sort=createdAt,desc"
-```
+- 비밀번호는 명령행 인자로 받지 않습니다. 콘솔이 없는 환경(예: `bootRun`)에서는 환경변수 `MANHWANET_ADMIN_PASSWORD`를 쓰고, 실행 후 지웁니다.
+- 같은 이메일의 ADMIN이 있으면 변경 없이 끝나고, 같은 이메일의 일반 사용자가 있으면 실패합니다(자동 승격 없음).
 
-> ⚠️ 이 설정은 **관리자 인증을 대신하지 않습니다.** 같은 PC 안의 다른 프로그램이나 브라우저 페이지도 호출할 수 있으므로 필요할 때만 켜고, 운영·공유 환경에서는 켜지 마세요. 플래그는 Docker Compose와 공유하는 `.env`가 아니라 OS 환경변수로 지정합니다.
+로그인 후 등록 API 호출 예 (PowerShell, 세션·CSRF 쿠키 유지):
+
+```powershell
+$s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+Invoke-WebRequest http://127.0.0.1:8080/api/v1/auth/csrf -WebSession $s | Out-Null
+$h = @{ "X-XSRF-TOKEN" = $s.Cookies.GetCookies("http://127.0.0.1:8080")["XSRF-TOKEN"].Value }
+Invoke-RestMethod http://127.0.0.1:8080/api/v1/auth/login -Method Post -WebSession $s -Headers $h -ContentType "application/json" -Body '{"email":"admin@example.com","password":"(비밀번호)"}'
+# 로그인하면 CSRF 토큰이 바뀌므로 헤더를 다시 만듭니다.
+$h = @{ "X-XSRF-TOKEN" = $s.Cookies.GetCookies("http://127.0.0.1:8080")["XSRF-TOKEN"].Value }
+Invoke-RestMethod http://127.0.0.1:8080/api/v1/admin/creators -Method Post -WebSession $s -Headers $h -ContentType "application/json; charset=utf-8" -Body '{"name":"한서윤"}'
+```
 
 ### 3. Frontend 실행
 
@@ -194,16 +204,20 @@ cd backend
 | `GlobalExceptionHandlerTest` | 공통 응답 형식, `/api/v1` prefix, 400/404/405/415/500 예외 변환 | X |
 | `HealthControllerTest` | health 정상/503 응답 | X |
 | `HealthServiceTest` | DB 연결 성공/실패 판정 | X |
-| `ManhwanetApplicationTests` | 컨텍스트 로딩, Flyway V1 적용, 실제 DB 대상 health, 404 | O |
+| `ManhwanetApplicationTests` | 컨텍스트 로딩, Flyway V1·V3 적용, 실제 DB 대상 health, 공개 경로 404·비공개 경로 401 | O |
 | `PageableFactoryTest`, `LanguageTagsTest`, `CountryCodesTest`, `WorkTest`, `WorkServiceTest` | 정렬 파싱, 언어·국가 코드 정규화, 도메인 불변식, 중복 제약 → 409 변환 | X |
 | `WorkControllerTest`, `CreatorControllerTest` | 페이지·정렬 파라미터 검증, 404 | X |
 | `WorkCreatorMigrationTest` | V2 적용, 제약·인덱스 이름, DB 제약 동작 | O |
-| `AdminApiDisabledWithoutLocalProfileTest`, `AdminApiDisabledByDefaultTest` | 등록 API 비활성 조건, loopback 바인딩 설정 | O |
+| `PasswordPolicyTest`, `AccountFieldsTest`, `LoginAttemptLimiterTest`, `CreateAdminCommandTest` | 비밀번호 정책·정규화, 이메일·닉네임, 로그인 실패 제한(동시성·만료), 관리자 명령 입력 | X |
+| `AuthApiIntegrationTest` | 가입·로그인·로그아웃·me, CSRF 발급·교체·누락, 세션 ID 변경, 실패 제한 | O |
+| `AdminAuthorizationIntegrationTest` | 등록 API 접근 규칙: 익명 401, USER 403, ADMIN 허용, CSRF 누락 403 | O |
+| `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |
+| `SessionCookieHttpTest`, `LocalSessionCookieHttpTest` | 실제 HTTP 응답의 쿠키 속성(`__Host-`, local), 세션 흐름, ERROR 디스패치, loopback 바인딩 | O |
 | `CreatorApiIntegrationTest`, `WorkApiIntegrationTest` | 등록·조회 API 전체 흐름, 입력 오류, 정렬·페이징 | O |
 | `WorkQueryCountTest` | 데이터가 늘어도 목록·상세 조회 SQL 수가 늘지 않음 (N+1 회귀) | O |
 
 - 통합 테스트는 테스트 DB 이름이 `_test`로 끝나고 `DB_NAME`과 다른지 확인한 뒤, `TRUNCATE` 직전에 `current_database()`가 그 이름과 같은지 다시 확인합니다. 이름이 같거나, 비어 있거나, 접미사가 없으면 정리를 거절합니다. `_test` 접미사는 안전장치이며, 그 DB의 과거 용도를 증명하지는 않습니다.
-- 등록 API 통합 테스트만 `local`, `test` 프로필과 `manhwanet.admin-api.enabled=true`를 명시적으로 켭니다.
+- 등록 API 통합 테스트는 ADMIN 사용자와 CSRF 토큰으로 요청합니다(spring-security-test).
 
 테스트 리포트: `backend/build/reports/tests/test/index.html`
 
@@ -252,11 +266,17 @@ npm run build
 | GET | `/api/v1/works/{workId}` | 작품 상세 |
 | GET | `/api/v1/creators` | 작가 목록 (`page`, `size`, `sort`) |
 | GET | `/api/v1/creators/{creatorId}` | 작가 상세 |
-| POST | `/api/v1/admin/works` | 작품 등록 (로컬 전용, 위 설정 필요) |
-| POST | `/api/v1/admin/creators` | 작가 등록 (로컬 전용, 위 설정 필요) |
+| GET | `/api/v1/auth/csrf` | CSRF 토큰 쿠키(`XSRF-TOKEN`) 발급 |
+| POST | `/api/v1/auth/signup` | 가입(항상 USER) + 자동 로그인 |
+| POST | `/api/v1/auth/login` | 로그인 |
+| POST | `/api/v1/auth/logout` | 로그아웃 |
+| GET | `/api/v1/auth/me` | 현재 사용자 (로그인 필요) |
+| POST | `/api/v1/admin/works` | 작품 등록 (ADMIN) |
+| POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN) |
 
 - 페이지: `page` 0부터(기본 0), `size` 1~100(기본 20), `sort`는 `createdAt` 또는 `id`에 `,asc`/`,desc` (기본 `createdAt,desc` + `id,desc`). 범위 밖 값이나 허용하지 않은 정렬은 400입니다.
-- 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md)를 참고하세요.
+- 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md)를 참고하세요.
+- POST 등 변경 요청은 `XSRF-TOKEN` 쿠키 값을 `X-XSRF-TOKEN` 헤더로 보내야 합니다. 공개 GET(작품·작가·health) 외의 경로는 로그인이 필요합니다.
 
 ## API 공통 규약
 

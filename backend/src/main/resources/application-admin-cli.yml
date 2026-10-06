@@ -1,0 +1,6 @@
+# 관리자 계정 생성 명령 전용 프로필. 웹 서버를 띄우지 않고 CreateAdminCommand 만 실행한 뒤 종료한다.
+# 예) java -jar manhwanet.jar --spring.profiles.active=local,admin-cli --manhwanet.admin-cli.email=admin@example.com
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off

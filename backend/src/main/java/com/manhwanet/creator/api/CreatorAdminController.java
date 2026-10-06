@@ -3,7 +3,6 @@ package com.manhwanet.creator.api;
 import com.manhwanet.creator.application.CreatorService;
 import com.manhwanet.creator.dto.CreateCreatorRequest;
 import com.manhwanet.creator.dto.CreatorResponse;
-import com.manhwanet.global.config.ConditionalOnAdminApiEnabled;
 import com.manhwanet.global.config.WebConfig;
 import com.manhwanet.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -17,11 +16,10 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /**
  * 작가 등록 API. POST /api/v1/admin/creators
- * 인증 구현 전에는 local 프로필 + manhwanet.admin-api.enabled=true 일 때만 등록된다.
+ * ADMIN 권한이 필요하다 (WebSecurityConfig: /api/v1/admin/** → hasRole("ADMIN")).
  */
 @RestController
 @RequestMapping("/admin/creators")
-@ConditionalOnAdminApiEnabled
 public class CreatorAdminController {
 
     private final CreatorService creatorService;

@@ -1,21 +1,34 @@
 package com.manhwanet.global.error;
 
-import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.manhwanet.global.security.AuthenticationConfig;
+import com.manhwanet.global.security.WebSecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(controllers = ExceptionTestController.class)
+@Import({AuthenticationConfig.class, WebSecurityConfig.class})
+@WithMockUser
 class GlobalExceptionHandlerTest {
+
+    /** 보안 설정이 요구하는 Bean (슬라이스 테스트에는 user 도메인이 없다) */
+    @MockitoBean
+    private UserDetailsService userDetailsService;
 
     private static final String BASE = "/api/v1/test-exceptions";
 
@@ -51,7 +64,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void requestBodyValidationFailureReturnsFieldErrors() throws Exception {
-        mockMvc.perform(post(BASE + "/body")
+        mockMvc.perform(post(BASE + "/body").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"\"}"))
                 .andExpect(status().isBadRequest())
@@ -62,7 +75,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void malformedJsonReturnsBadRequest() throws Exception {
-        mockMvc.perform(post(BASE + "/body")
+        mockMvc.perform(post(BASE + "/body").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{invalid"))
                 .andExpect(status().isBadRequest())
@@ -95,14 +108,14 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void unsupportedMethodReturnsMethodNotAllowed() throws Exception {
-        mockMvc.perform(post(BASE + "/ok"))
+        mockMvc.perform(post(BASE + "/ok").with(csrf()))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.error.code").value("METHOD_NOT_ALLOWED"));
     }
 
     @Test
     void unsupportedContentTypeReturnsUnsupportedMediaType() throws Exception {
-        mockMvc.perform(post(BASE + "/body")
+        mockMvc.perform(post(BASE + "/body").with(csrf())
                         .contentType(MediaType.TEXT_PLAIN)
                         .content("name"))
                 .andExpect(status().isUnsupportedMediaType())

@@ -64,10 +64,13 @@
 - `created_at`, `updated_at`은 Spring Data JPA Auditing이 채웁니다(마이크로초 정밀도).
 - JPA를 거치지 않은 SQL 직접 수정은 `updated_at`을 갱신하지 않습니다. (DB 트리거 없음)
 
-### 등록(관리자) API — 인증 구현 전
+### 인증·인가 — Spring Security
 
-- 등록 API는 `/api/v1/admin/**`에 둡니다. 인증 구현 전에는 `@ConditionalOnAdminApiEnabled`(local 프로필 + `manhwanet.admin-api.enabled=true`, 기본 false)일 때만 Controller가 등록되며, local 프로필은 서버를 127.0.0.1에 바인딩합니다.
-- **이 장치는 관리자 인증을 대신하지 않습니다.** auth 도메인을 구현하면 `/api/v1/admin/**`에 인증·인가를 적용하고 이 조건을 제거합니다.
+- 이메일·비밀번호 로그인, 서버 메모리 세션 + HttpOnly 쿠키, SPA 방식 CSRF(쿠키 `XSRF-TOKEN` + 헤더 `X-XSRF-TOKEN`). 상세: [auth-design-draft.md](auth-design-draft.md)(확정 명세)
+- 규칙: 공개 GET(health·작품·작가)과 인증 진입점만 허용, `/api/v1/admin/**`는 ADMIN, 나머지는 로그인 필요(기본 거부). ERROR 디스패치는 허용합니다.
+- 보안 필터 단계의 실패(401·403·CSRF)는 `@RestControllerAdvice`에 도달하지 않으므로 `JsonSecurityErrorHandler`가 `ApiResponse` 형식으로 직접 응답합니다.
+- 관리자 계정은 비웹 `admin-cli` 프로필 명령으로만 만듭니다. 이전의 `@ConditionalOnAdminApiEnabled` 조건부 등록은 제거되었습니다.
+- local 프로필은 서버를 127.0.0.1에 바인딩합니다(개발 편의, 인증과 별개).
 
 ### DB 스키마
 
