@@ -63,8 +63,31 @@ manhwanet/
 
 - **JDK 21** (Gradle toolchain이 Java 21을 요구합니다. `java -version`으로 확인)
 - **Docker** + Docker Compose v2 (`docker compose version`)
-- **Node.js 20.9 이상** (권장: 22 LTS) 및 npm
+- **Node.js 24** 및 npm. 지원 범위는 `>=24.19.0 <25`입니다. 이 환경에서 설치하고 `npm ci`, 테스트, lint, build를 실행해 확인한 버전은 **24.19.0**입니다.
 - Gradle은 설치할 필요 없습니다. (`gradlew` Wrapper가 8.14.3을 내려받습니다.)
+
+Node.js 20은 2026-04-30에 지원이 끝났습니다. 2026-10-06 기준 지원 중인 LTS는 24(Active, 2026-10-20부터 Maintenance, 지원 종료 2028-04-30)와 22(Maintenance, 지원 종료 2027-04-30)입니다. 26은 2026-10-28에 LTS가 되기 전까지 Current입니다. 프론트엔드 잠금 파일의 `eslint-visitor-keys@5.0.1`은 `^20.19.0 || ^22.13.0 || >=24`, `@napi-rs/wasm-runtime@1.2.5`는 `^20.19.0 || ^22.13.0 || >=23.5.0`을 요구합니다. Next.js 16.3.8은 `>=20.9.0`입니다. 이 조건을 모두 만족하는 Active LTS로 24를 사용합니다.
+
+`frontend/package.json`의 `engines.node`는 `>=24.19.0 <25`입니다. 이 값은 지원 범위를 알리는 안내이며, 24.19.0만 허용한다는 뜻이 아닙니다. `.npmrc`에 `engine-strict`를 넣지 않았으므로 다른 버전에서 설치와 실행을 막지 않습니다.
+
+### Windows에서 Node.js 맞추기
+
+공식 설치 파일은 `C:\Program Files\nodejs` 한 곳에 둡니다. nvm, fnm 같은 버전 관리 도구는 추가하지 않습니다. 이미 winget의 `OpenJS.NodeJS.20`이 있으면 먼저 제거해 실행 파일이 두 개가 되지 않게 합니다.
+
+```powershell
+winget uninstall --id OpenJS.NodeJS.20 --exact
+winget install --id OpenJS.NodeJS.LTS --exact
+```
+
+2026-10-06에 `OpenJS.NodeJS.LTS`는 24.19.0입니다. nodejs.org의 24 최신 패치는 24.21.0이지만, 그 MSI는 이 환경에서 관리자 권한 부족으로 설치하지 못했습니다. 설치 뒤 **새** PowerShell에서 확인합니다.
+
+```powershell
+node -v
+npm -v
+Get-Command node | Select-Object -ExpandProperty Source
+```
+
+`node -v`가 `v24.19.0`이고 경로가 `C:\Program Files\nodejs\node.exe`이면 됩니다.
 
 ## 빠른 시작
 
