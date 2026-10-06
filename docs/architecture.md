@@ -1,11 +1,14 @@
-# 아키텍처 원칙 (Phase 1 Foundation)
+# 아키텍처 원칙
 
 ## Modular Monolith
 
 - 하나의 Spring Boot 애플리케이션으로 배포합니다. (Microservice 아님)
 - 도메인별 최상위 패키지로 모듈을 나눕니다: `com.manhwanet.<domain>`
 - 예정 도메인: `auth`, `user`, `work`, `creator`, `genre`, `platform`, `rating`, `review`, `comment`, `ranking`, `search`, `report`, `admin`, `global`
-- 현재는 `global`(공통 설정·응답·예외·health)만 존재합니다. 도메인 패키지는 **기능을 실제로 구현할 때** 만듭니다.
+- 구현된 패키지: `global`(공통 설정·응답·예외·health·페이지·시각), `creator`, `work` ([명세](work-creator-spec.md))
+- 나머지 도메인 패키지는 **기능을 실제로 구현할 때** 만듭니다.
+- 도메인 내부는 `api`(Controller), `application`(Service, 다른 도메인에 공개하는 타입), `domain`(Entity, Repository, 도메인 규칙), `dto`(요청·응답)로 나눕니다.
+- 다른 도메인의 Entity는 JPA 연관관계로 참조하지 않고 ID 값으로 참조합니다. DB 외래 키는 유지합니다. (예: `WorkCreator.creatorId`)
 
 ## 계층 책임
 
@@ -47,6 +50,24 @@
 - `GlobalExceptionHandler`가 모든 예외를 `ApiResponse` 형식과 `ErrorCode`의 HTTP 상태로 변환합니다.
 - 예상하지 못한 예외는 `500 INTERNAL_SERVER_ERROR`로 응답하고 상세 내용은 로그에만 남깁니다.
 - 도메인 전용 오류 코드는 해당 도메인을 구현할 때 추가합니다.
+- 서비스 계층에서 검증한 입력 오류는 `InvalidInputException(fieldErrors)`로 던져 400 `INVALID_INPUT`과 필드 오류로 응답합니다.
+- `DataIntegrityViolationException`을 일괄 변환하지 않습니다. 도메인 서비스가 **예상한 이름의 유니크 제약 위반만** 409 `DUPLICATE_RESOURCE`로 바꾸고, 나머지는 500으로 둡니다.
+
+### 페이지네이션 — `PageResponse<T>`
+
+- 목록 API는 `page`(0부터), `size`(1~100, 기본 20), `sort`를 직접 받아 요청 경계에서 검증하고 `PageableFactory`로 `Pageable`을 만듭니다. Spring의 `Pageable` 자동 바인딩(값을 조용히 보정)은 사용하지 않습니다.
+- 정렬 키는 허용 목록(`createdAt`, `id`)으로 제한하고, `createdAt` 정렬에는 같은 방향의 `id`를 보조 기준으로 붙입니다.
+- 컬렉션 fetch join과 페이징을 결합하지 않습니다. 페이지 조회 후 연관 데이터를 페이지 단위 `IN` 쿼리로 일괄 조회합니다.
+
+### 생성·수정 시각 — `BaseTimeEntity`
+
+- `created_at`, `updated_at`은 Spring Data JPA Auditing이 채웁니다(마이크로초 정밀도).
+- JPA를 거치지 않은 SQL 직접 수정은 `updated_at`을 갱신하지 않습니다. (DB 트리거 없음)
+
+### 등록(관리자) API — 인증 구현 전
+
+- 등록 API는 `/api/v1/admin/**`에 둡니다. 인증 구현 전에는 `@ConditionalOnAdminApiEnabled`(local 프로필 + `manhwanet.admin-api.enabled=true`, 기본 false)일 때만 Controller가 등록되며, local 프로필은 서버를 127.0.0.1에 바인딩합니다.
+- **이 장치는 관리자 인증을 대신하지 않습니다.** auth 도메인을 구현하면 `/api/v1/admin/**`에 인증·인가를 적용하고 이 조건을 제거합니다.
 
 ### DB 스키마
 

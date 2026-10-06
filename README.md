@@ -2,9 +2,10 @@
 
 한국 웹툰과 일본 만화를 통합하여 작품을 검색하고, 별점·리뷰·댓글을 작성하며, 여러 기준의 작품 랭킹을 확인할 수 있는 서비스입니다.
 
-> **현재 단계: Phase 1 — Foundation**
-> 비즈니스 기능(회원, 작품, 별점, 리뷰, 랭킹, 검색 등)은 아직 구현되어 있지 않습니다.
-> 이후 기능 개발을 위한 프로젝트 기반(빌드, DB 연결, 마이그레이션, 공통 응답/예외 처리, 테스트 환경)만 구성되어 있습니다.
+> **현재 단계: Phase 2 — 작품·작가 등록/조회**
+> 작품(Work·WorkTitle)과 작가(Creator·WorkCreator)의 등록·조회 API가 구현되어 있습니다. ([명세](docs/work-creator-spec.md))
+> 회원, 인증, 별점, 리뷰, 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
+> 공통 기반(빌드, DB 연결, 마이그레이션, 공통 응답/예외 처리, 테스트 환경) 위에 작품·작가 등록·조회 API가 구현되어 있습니다.
 
 ## 기술 스택
 
@@ -27,16 +28,20 @@ manhwanet/
 │   └── src/
 │       ├── main/java/com/manhwanet/
 │       │   ├── ManhwanetApplication.java
+│       │   ├── creator/             # 작가 (api / application / domain / dto)
+│       │   ├── work/                # 작품·제목·작품-작가 연결 (api / application / domain / dto)
 │       │   └── global/
-│       │       ├── config/          # WebConfig (/api/v1 prefix)
-│       │       ├── response/        # ApiResponse, ApiError (공통 응답)
-│       │       ├── error/           # ErrorCode, BusinessException, GlobalExceptionHandler
+│       │       ├── config/          # WebConfig(/api/v1), JPA Auditing, 등록 API 노출 조건
+│       │       ├── response/        # ApiResponse, ApiError, PageResponse (공통 응답)
+│       │       ├── error/           # ErrorCode, BusinessException, InvalidInputException, GlobalExceptionHandler
+│       │       ├── jpa/             # BaseTimeEntity (created_at / updated_at)
+│       │       ├── pagination/      # PageableFactory (page·size·sort 검증)
 │       │       └── health/          # GET /api/v1/health
 │       ├── main/resources/
 │       │   ├── application.yml      # 공통 설정
 │       │   ├── application-local.yml# 로컬 프로필 (기본)
 │       │   ├── application-test.yml # 테스트 프로필
-│       │   └── db/migration/        # Flyway 마이그레이션 (V1__init.sql)
+│       │   └── db/migration/        # Flyway 마이그레이션 (V1__init, V2__create_work_and_creator_tables)
 │       └── test/java/com/manhwanet/
 ├── frontend/                        # Next.js + TypeScript + App Router
 │   ├── src/app/                     # layout.tsx, page.tsx
@@ -100,6 +105,26 @@ curl http://localhost:8080/api/v1/health
 
 DB에 연결할 수 없으면 `503`과 `{"success":false,"error":{"code":"SERVICE_UNAVAILABLE",...}}`을 반환합니다.
 
+- `local` 프로필은 서버를 **loopback 주소(127.0.0.1)에만 바인딩**합니다. 같은 PC에서 `http://localhost:8080`으로 접속합니다.
+
+#### 등록(관리자) API 켜기 — 로컬 전용
+
+인증이 구현되기 전까지 등록 API(`/api/v1/admin/**`)는 **`local` 프로필 + `manhwanet.admin-api.enabled=true`** 일 때만 생성됩니다. 기본값은 false이며, 조회 API는 항상 동작합니다.
+
+```bash
+MANHWANET_ADMIN_API_ENABLED=true ./gradlew bootRun                    # macOS / Linux / Git Bash
+$env:MANHWANET_ADMIN_API_ENABLED="true"; .\gradlew.bat bootRun        # Windows PowerShell
+```
+
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/creators -H "Content-Type: application/json" -d '{"name":"한서윤"}'
+curl -X POST http://localhost:8080/api/v1/admin/works -H "Content-Type: application/json" \
+  -d '{"workFormat":"WEBTOON","titles":[{"title":"달빛 기사단","languageCode":"ko","primary":true}],"creators":[{"creatorId":1,"role":"STORY"}]}'
+curl "http://localhost:8080/api/v1/works?page=0&size=20&sort=createdAt,desc"
+```
+
+> ⚠️ 이 설정은 **관리자 인증을 대신하지 않습니다.** 같은 PC 안의 다른 프로그램이나 브라우저 페이지도 호출할 수 있으므로 필요할 때만 켜고, 운영·공유 환경에서는 켜지 마세요. 플래그는 Docker Compose와 공유하는 `.env`가 아니라 OS 환경변수로 지정합니다.
+
 ### 3. Frontend 실행
 
 ```bash
@@ -131,6 +156,15 @@ cd backend
 | `HealthControllerTest` | health 정상/503 응답 | X |
 | `HealthServiceTest` | DB 연결 성공/실패 판정 | X |
 | `ManhwanetApplicationTests` | 컨텍스트 로딩, Flyway V1 적용, 실제 DB 대상 health, 404 | O |
+| `PageableFactoryTest`, `LanguageTagsTest`, `CountryCodesTest`, `WorkTest`, `WorkServiceTest` | 정렬 파싱, 언어·국가 코드 정규화, 도메인 불변식, 중복 제약 → 409 변환 | X |
+| `WorkControllerTest`, `CreatorControllerTest` | 페이지·정렬 파라미터 검증, 404 | X |
+| `WorkCreatorMigrationTest` | V2 적용, 제약·인덱스 이름, DB 제약 동작 | O |
+| `AdminApiDisabledWithoutLocalProfileTest`, `AdminApiDisabledByDefaultTest` | 등록 API 비활성 조건, loopback 바인딩 설정 | O |
+| `CreatorApiIntegrationTest`, `WorkApiIntegrationTest` | 등록·조회 API 전체 흐름, 입력 오류, 정렬·페이징 | O |
+| `WorkQueryCountTest` | 데이터가 늘어도 목록·상세 조회 SQL 수가 늘지 않음 (N+1 회귀) | O |
+
+- 통합 테스트는 테스트 DB 이름이 `_test`로 끝나고 `DB_NAME`과 다른지 확인한 뒤, `TRUNCATE` 직전에 `current_database()`가 그 이름과 같은지 다시 확인합니다. 이름이 같거나, 비어 있거나, 접미사가 없으면 정리를 거절합니다. `_test` 접미사는 안전장치이며, 그 DB의 과거 용도를 증명하지는 않습니다.
+- 등록 API 통합 테스트만 `local`, `test` 프로필과 `manhwanet.admin-api.enabled=true`를 명시적으로 켭니다.
 
 테스트 리포트: `backend/build/reports/tests/test/index.html`
 
@@ -168,8 +202,24 @@ npm run build
 
 `NEXT_PUBLIC_` 값은 브라우저 번들에 포함되므로 secret을 넣지 않습니다. 코드에서는 `src/config/env.ts`의 `env.apiBaseUrl`로 접근합니다.
 
+## API
+
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| GET | `/api/v1/health` | 애플리케이션·DB 상태 |
+| GET | `/api/v1/works` | 작품 목록 (`page`, `size`, `sort`) |
+| GET | `/api/v1/works/{workId}` | 작품 상세 |
+| GET | `/api/v1/creators` | 작가 목록 (`page`, `size`, `sort`) |
+| GET | `/api/v1/creators/{creatorId}` | 작가 상세 |
+| POST | `/api/v1/admin/works` | 작품 등록 (로컬 전용, 위 설정 필요) |
+| POST | `/api/v1/admin/creators` | 작가 등록 (로컬 전용, 위 설정 필요) |
+
+- 페이지: `page` 0부터(기본 0), `size` 1~100(기본 20), `sort`는 `createdAt` 또는 `id`에 `,asc`/`,desc` (기본 `createdAt,desc` + `id,desc`). 범위 밖 값이나 허용하지 않은 정렬은 400입니다.
+- 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md)를 참고하세요.
+
 ## API 공통 규약
 
 - Base prefix: `/api/v1` (Controller에는 도메인 경로만 선언하면 `WebConfig`가 prefix를 붙입니다.)
 - 성공: `{"success": true, "data": ...}`
 - 실패: `{"success": false, "error": {"code": "INVALID_INPUT", "message": "...", "fieldErrors": [{"field": "name", "reason": "..."}]}}`
+- 페이지 응답 `data`: `{"content": [...], "page": 0, "size": 20, "totalElements": 0, "totalPages": 0, "hasNext": false}`

@@ -23,3 +23,9 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+
+manhwanet:
+  admin-api:
+    # 등록(관리자) API 활성화 여부. local 프로필 + true 일 때만 등록 Controller 가 생성된다.
+    # 관리자 인증을 대신하지 않는다. (docs/work-creator-spec.md 6.1)
+    enabled: false

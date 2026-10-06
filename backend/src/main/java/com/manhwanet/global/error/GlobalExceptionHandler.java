@@ -33,6 +33,12 @@ public class GlobalExceptionHandler {
         return toResponse(e.getErrorCode(), e.getMessage(), List.of());
     }
 
+    /** 서비스 계층 입력 검증 실패 (정규화가 필요한 규칙, 존재하지 않는 참조 등) */
+    @ExceptionHandler(InvalidInputException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidInput(InvalidInputException e) {
+        return toResponse(ErrorCode.INVALID_INPUT, e.getFieldErrors());
+    }
+
     /** @RequestBody @Valid 검증 실패 */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleMethodArgumentNotValid(MethodArgumentNotValidException e) {
