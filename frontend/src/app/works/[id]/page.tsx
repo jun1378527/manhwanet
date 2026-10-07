@@ -3,10 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CreditList } from "@/components/CreditList";
+import { WorkRatingSection } from "@/components/ratings/WorkRatingSection";
 import { ApiUnavailable } from "@/components/StatusMessage";
 import { getWork } from "@/lib/api/works";
+import { getSession } from "@/lib/auth/session";
+import { type MyRatingState, getMyRating } from "@/lib/ratings/server";
 import { WORK_FORMAT_LABELS, countryLabel, languageLabel } from "@/lib/works/labels";
-import { isValidWorkId, parseReturnPage, worksListHref } from "@/lib/works/params";
+import { isValidWorkId, parseReturnPage, workDetailHref, worksListHref } from "@/lib/works/params";
 
 export async function generateMetadata({ params }: PageProps<"/works/[id]">): Promise<Metadata> {
   const { id } = await params;
@@ -25,7 +28,8 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
   if (!isValidWorkId(id)) {
     notFound();
   }
-  const result = await getWork(id);
+  // 작품과 내 별점(로그인했을 때만)을 함께 불러온다. 내 별점은 사용자별 응답이므로 캐시하지 않는다.
+  const [result, { myRating, viewerKey }] = await Promise.all([getWork(id), loadMyRating(id)]);
   if (!result.ok) {
     if (result.reason === "not-found") {
       notFound();
@@ -63,6 +67,14 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
         </div>
       </dl>
 
+      <WorkRatingSection
+        key={viewerKey}
+        workId={work.id}
+        initialSummary={work.rating}
+        initialMine={myRating}
+        selfHref={workDetailHref(work.id, parseReturnPage(from))}
+      />
+
       <section aria-labelledby="credits-heading">
         <h2 id="credits-heading">작가</h2>
         <CreditList credits={work.creators} />
@@ -94,6 +106,19 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
       </section>
     </article>
   );
+}
+
+/**
+ * 로그인 상태에 따라 내 별점을 불러온다. 백엔드 장애는 비로그인으로 바꾸지 않는다.
+ * viewerKey: 로그인·로그아웃 후(router.refresh) 사용자나 상태가 바뀌면 별점 영역을 새 상태로 다시 만들기 위한 key
+ */
+async function loadMyRating(workId: string): Promise<{ myRating: MyRatingState; viewerKey: string }> {
+  const session = await getSession();
+  if (session.status !== "authenticated") {
+    return { myRating: { status: session.status }, viewerKey: session.status };
+  }
+  const myRating = await getMyRating(workId);
+  return { myRating, viewerKey: `${session.user.id}:${myRating.status}` };
 }
 
 function BackLink({ href }: { href: string }) {

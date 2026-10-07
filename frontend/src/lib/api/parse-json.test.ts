@@ -82,3 +82,36 @@ describe("parseApiBody", () => {
     assert.equal(typeof parsed.data.hasNext, "boolean");
   });
 });
+
+describe("rating payloads", () => {
+  for (const id of IDS) {
+    it(`keeps my-rating workId ${id} exact`, () => {
+      const parsed = parseApiBody(
+        envelope(`{"workId":${id},"score":4.5,"createdAt":"2026-10-07T00:00:00Z","updatedAt":"2026-10-07T00:00:00Z"}`),
+      ) as { data: { workId: unknown; score: unknown } };
+      assert.equal(parsed.data.workId, id);
+      assert.equal(typeof parsed.data.workId, "string");
+      assert.equal(parsed.data.score, 4.5);
+    });
+  }
+
+  it("rounds a large workId with JSON.parse but not with parseApiBody", () => {
+    const text = envelope(`{"workId":${PAST_SAFE},"score":null,"createdAt":null,"updatedAt":null}`);
+    assert.notEqual(String((JSON.parse(text) as { data: { workId: number } }).data.workId), PAST_SAFE);
+    assert.equal((parseApiBody(text) as { data: { workId: string } }).data.workId, PAST_SAFE);
+  });
+
+  it("keeps rating average and count as numbers", () => {
+    const work = `{"id":${LONG_MAX},"rating":{"average":4.0,"count":12}}`;
+    const parsed = parseApiBody(envelope(work)) as { data: { id: string; rating: { average: number; count: number } } };
+    assert.equal(parsed.data.id, LONG_MAX);
+    assert.equal(parsed.data.rating.average, 4);
+    assert.equal(parsed.data.rating.average.toFixed(1), "4.0");
+    assert.equal(parsed.data.rating.count, 12);
+    const empty = parseApiBody(envelope(`{"rating":{"average":null,"count":0}}`)) as {
+      data: { rating: { average: null; count: number } };
+    };
+    assert.equal(empty.data.rating.average, null);
+    assert.equal(empty.data.rating.count, 0);
+  });
+});

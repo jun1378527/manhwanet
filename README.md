@@ -5,7 +5,7 @@
 > **현재 단계: Phase 2 — 작품·작가 등록/조회**
 > 작품(Work·WorkTitle)과 작가(Creator·WorkCreator)의 등록·조회 API가 구현되어 있습니다. ([명세](docs/work-creator-spec.md))
 > Frontend에서 작품 목록(`/works`)과 상세(`/works/[id]`)를 보고, 가입(`/signup`)·로그인(`/login`)·로그아웃할 수 있습니다.
-> 별점 백엔드 API(내 별점 등록·수정·삭제, 작품 목록·상세의 평균·참여자 수)가 구현되어 있습니다. ([명세](docs/rating-design-draft.md)) 별점 화면은 아직 없습니다.
+> 작품 별점(내 별점 등록·수정·삭제, 작품 목록·상세의 평균·참여자 수)을 API와 화면에서 쓸 수 있습니다. ([명세](docs/rating-design-draft.md))
 > 리뷰, 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
 > 공통 기반(빌드, DB 연결, 마이그레이션, 공통 응답/예외 처리, 테스트 환경) 위에 작품·작가 등록·조회 API가 구현되어 있습니다.
 
@@ -183,6 +183,8 @@ npm run dev
 | `/login?returnTo=경로` | 로그인 (이메일·비밀번호). 성공하면 `returnTo`, 없으면 `/works`로 이동 |
 | `/signup?returnTo=경로` | 회원가입 (이메일·닉네임·비밀번호). 가입과 동시에 로그인됨 |
 
+- 작품 목록·상세에 별점 평균과 참여자 수를 표시합니다(없으면 "아직 평가가 없습니다"). 상세에서 로그인한 사용자는 0.5~5.0점을 골라 "저장" 버튼으로 등록·변경하고 삭제할 수 있습니다. 상세 동작은 [docs/rating-design-draft.md](docs/rating-design-draft.md) §7을 참고하세요.
+
 - 작품 조회는 **서버(Server Component)**에서 `API_BASE_URL`로 직접 호출합니다.
 - 브라우저의 인증 요청(가입·로그인·로그아웃·상태 확인)은 **같은 출처 `/api/v1/**`**로 보내고, Next.js Route Handler(`src/app/api/v1/[...path]/route.ts`)가 서버 설정 `API_BASE_URL` 아래 같은 경로로만 전달합니다. 브라우저가 Backend를 직접 호출하지 않으므로 Backend CORS 설정이 필요 없습니다.
   - 넘기는 것: `Accept`, `Accept-Language`, `Content-Type`, `X-XSRF-TOKEN`, 세션·`XSRF-TOKEN` 쿠키. 돌려주는 것: 상태 코드, 본문, `Set-Cookie`(모두), `Content-Type`, `Cache-Control`, `Retry-After`, 같은 출처 `Location`
@@ -240,7 +242,7 @@ cd backend
 
 ```bash
 cd frontend
-npm test                                  # src/**/*.test.ts (JSON 무손실 파싱, 프록시 규칙, returnTo, 입력 검사, 오류 안내)
+npm test                                  # src/**/*.test.ts (JSON 무손실 파싱, 프록시 규칙, 브라우저 API·CSRF·204, returnTo, 입력 검사, 별점 규칙, 오류 안내)
 npm run lint
 npm run build
 ```

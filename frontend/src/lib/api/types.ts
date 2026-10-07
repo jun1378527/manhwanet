@@ -50,6 +50,16 @@ export type Credit = {
   role: CreatorRole;
 };
 
+/**
+ * 공개 별점 집계. backend com.manhwanet.work.dto.RatingSummaryResponse
+ * - average: 0.5~5.0, 소수 첫째 자리(HALF_UP). 참여자가 없으면 null
+ * - count: 현재 별점이 있는 사용자 수
+ */
+export type RatingSummary = {
+  average: number | null;
+  count: number;
+};
+
 export type WorkSummary = {
   /** 백엔드 Long. JSON 숫자 정밀도 손실을 피하려고 원문 십진수 문자열로 둔다. */
   id: string;
@@ -58,6 +68,7 @@ export type WorkSummary = {
   primaryTitle: PrimaryTitle;
   /** STORY → ART → ORIGINAL_STORY, 같은 역할은 creatorId 오름차순으로 정렬되어 온다. */
   creators: Credit[];
+  rating: RatingSummary;
   createdAt: string;
 };
 
@@ -71,6 +82,7 @@ export type WorkDetail = {
   /** 대표 제목이 먼저, 나머지는 등록 순서로 온다. */
   titles: WorkTitle[];
   creators: Credit[];
+  rating: RatingSummary;
   createdAt: string;
   updatedAt: string;
 };

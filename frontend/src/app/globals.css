@@ -472,3 +472,145 @@ h2 {
 .auth-form__submit {
   width: 100%;
 }
+
+/* 별점 */
+.rating-summary {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.rating-summary__star {
+  color: var(--color-focus);
+}
+
+.rating-summary__count,
+.rating-summary--empty {
+  color: var(--color-muted);
+}
+
+.work-card__rating {
+  margin-top: 8px;
+  font-size: 0.95rem;
+}
+
+.work-rating {
+  margin-top: 24px;
+}
+
+.work-rating__summary {
+  margin-bottom: 12px;
+  font-size: 1.05rem;
+}
+
+.work-rating__login,
+.work-rating__status {
+  margin: 0;
+}
+
+.work-rating__form {
+  display: grid;
+  gap: 12px;
+}
+
+.rating-picker {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.rating-picker legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.work-rating__saved {
+  color: var(--color-muted);
+  font-weight: 400;
+}
+
+.rating-picker__options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  max-width: 520px;
+}
+
+@media (min-width: 720px) {
+  .rating-picker__options {
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    max-width: none;
+  }
+}
+
+.rating-picker__option {
+  position: relative;
+  display: block;
+}
+
+/* 네이티브 라디오를 보이지 않게 두되 포커스·방향키 이동·스크린 리더는 그대로 쓴다 */
+.rating-picker__option input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.rating-picker__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rating-picker__option input:checked + .rating-picker__label {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 700;
+}
+
+.rating-picker__option input:focus-visible + .rating-picker__label {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.rating-picker[aria-invalid="true"] .rating-picker__label {
+  border-color: var(--color-danger);
+}
+
+.work-rating__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.button--secondary {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.work-rating__notice {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.work-rating__notice--error {
+  border-color: var(--color-danger);
+  background: var(--color-danger-surface);
+  color: var(--color-danger);
+}

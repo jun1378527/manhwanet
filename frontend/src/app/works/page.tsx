@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { CreditList } from "@/components/CreditList";
 import { Pagination } from "@/components/Pagination";
+import { RatingSummaryLine } from "@/components/ratings/RatingSummaryLine";
 import { ApiUnavailable, StatusMessage } from "@/components/StatusMessage";
 import { getWorks } from "@/lib/api/works";
 import { WORK_FORMAT_LABELS } from "@/lib/works/labels";
@@ -58,6 +59,7 @@ export default async function WorksPage({ searchParams }: PageProps<"/works">) {
                   <span className="badge">{WORK_FORMAT_LABELS[work.workFormat] ?? work.workFormat}</span>
                 </p>
                 <CreditList credits={work.creators} className="work-card__credits" />
+                <RatingSummaryLine summary={work.rating} className="work-card__rating" />
               </li>
             ))}
           </ol>

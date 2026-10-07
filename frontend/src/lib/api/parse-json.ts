@@ -1,10 +1,10 @@
 import { isLosslessNumber, parse } from "lossless-json";
 
-const EXACT_DECIMAL_KEYS = new Set(["id", "creatorId"]);
+const EXACT_DECIMAL_KEYS = new Set(["id", "creatorId", "workId"]);
 
 /**
  * API JSON 본문을 읽는다.
- * 작품 id와 creatorId는 원문 십진수 문자열로 두고, 페이지 수 같은 다른 숫자는 JavaScript number로 둔다.
+ * id·creatorId·workId(백엔드 Long)는 원문 십진수 문자열로 두고, 페이지 수·별점 같은 다른 숫자는 JavaScript number로 둔다.
  */
 export function parseApiBody(text: string): unknown {
   return parse(text, (key, value) => {
