@@ -1,0 +1,82 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { parseRetryAfter, type ApiFailure } from "./client-api";
+import { CSRF_FAILED_MESSAGE, UNAVAILABLE_MESSAGE, feedbackFor, retryAfterText } from "./messages";
+
+function failure(partial: Partial<ApiFailure>): ApiFailure {
+  return {
+    kind: "error",
+    status: 400,
+    code: undefined,
+    message: undefined,
+    fieldErrors: [],
+    retryAfterSeconds: null,
+    ...partial,
+  };
+}
+
+describe("feedbackFor", () => {
+  it("connects backend fieldErrors to inputs", () => {
+    const feedback = feedbackFor(
+      failure({
+        code: "INVALID_INPUT",
+        fieldErrors: [
+          { field: "password", reason: "너무 흔한 비밀번호입니다. 다른 비밀번호를 사용해 주세요." },
+          { field: "nickname", reason: "닉네임은 앞뒤 공백을 제외하고 2자 이상 30자 이하여야 합니다." },
+        ],
+      }),
+      "signup",
+    );
+    assert.equal(feedback.fieldErrors.password, "너무 흔한 비밀번호입니다. 다른 비밀번호를 사용해 주세요.");
+    assert.match(feedback.fieldErrors.nickname ?? "", /2자 이상 30자/);
+    assert.equal(feedback.formError, null);
+  });
+
+  it("shows unknown fields as a form error", () => {
+    const feedback = feedbackFor(
+      failure({ code: "INVALID_INPUT", message: "입력값이 올바르지 않습니다.", fieldErrors: [{ field: "body", reason: "형식 오류" }] }),
+      "login",
+    );
+    assert.deepEqual(feedback.fieldErrors, {});
+    assert.equal(feedback.formError, "형식 오류");
+  });
+
+  it("does not reveal which credential was wrong", () => {
+    const feedback = feedbackFor(failure({ status: 401, code: "INVALID_CREDENTIALS" }), "login");
+    assert.equal(feedback.formError, "이메일 또는 비밀번호가 올바르지 않습니다.");
+    assert.deepEqual(feedback.fieldErrors, {});
+  });
+
+  it("explains 429 with Retry-After", () => {
+    const feedback = feedbackFor(failure({ status: 429, code: "TOO_MANY_LOGIN_ATTEMPTS", retryAfterSeconds: 900 }), "login");
+    assert.equal(feedback.formError, "로그인 시도가 너무 많습니다. 약 15분 후 다시 시도해 주세요.");
+  });
+
+  it("puts duplicate email on the email input when signing up", () => {
+    const feedback = feedbackFor(failure({ status: 409, code: "DUPLICATE_RESOURCE", message: "이미 가입된 이메일입니다." }), "signup");
+    assert.equal(feedback.fieldErrors.email, "이미 가입된 이메일입니다.");
+  });
+
+  it("distinguishes outage and CSRF failure", () => {
+    assert.equal(feedbackFor({ kind: "unavailable" }, "login").formError, UNAVAILABLE_MESSAGE);
+    assert.equal(feedbackFor(failure({ status: 403, code: "INVALID_CSRF_TOKEN" }), "login").formError, CSRF_FAILED_MESSAGE);
+  });
+});
+
+describe("Retry-After", () => {
+  it("parses delta seconds only", () => {
+    assert.equal(parseRetryAfter("900"), 900);
+    assert.equal(parseRetryAfter(" 60 "), 60);
+    assert.equal(parseRetryAfter(null), null);
+    assert.equal(parseRetryAfter("Wed, 21 Oct 2026 07:28:00 GMT"), null);
+    assert.equal(parseRetryAfter("-1"), null);
+  });
+
+  it("formats as minutes", () => {
+    assert.equal(retryAfterText(900), "약 15분 후");
+    assert.equal(retryAfterText(61), "약 2분 후");
+    assert.equal(retryAfterText(30), "약 30초 후");
+    assert.equal(retryAfterText(null), "잠시 후");
+  });
+});

@@ -2,7 +2,7 @@
 
 > **상태: 확정 — 2026-10-06 사용자 결정 반영, 백엔드 구현 완료(커밋 전).**
 > 파일 이름은 초안 때와 같지만 내용은 확정 명세입니다. 초안의 결정 항목 D-1~D-13은 §1에서 모두 결정되었습니다.
-> Next.js 프록시·로그인 화면은 이번 범위가 아닙니다(§13).
+> 프론트엔드(같은 출처 프록시, 로그인·가입 화면, 헤더 로그인 상태)는 §14에 정리했습니다(#12).
 
 - 관련 문서: [architecture.md](architecture.md), [work-creator-spec.md](work-creator-spec.md)
 - 기준: Spring Boot 3.5.16 / **Spring Security 6.5.11** / PostgreSQL 17
@@ -194,7 +194,7 @@ Spring Security 6.5 문서의 "직접 인증 정보 저장" 방식을 따르며,
 - `__Host-` 접두사의 요구 조건(Secure, Path=/, Domain 없음)은 실제 HTTP 응답 테스트로 검증합니다.
 - local은 `__Host-`를 쓰지 않습니다. Secure가 없으면 브라우저가 그 쿠키를 거부하기 때문입니다.
 - 세션 추적은 쿠키만 사용합니다(`tracking-modes: cookie`, URL에 세션 ID 없음).
-- CORS 설정은 추가하지 않았습니다. 같은 출처 Next.js 프록시 구성은 후속 범위입니다(§13).
+- CORS 설정은 추가하지 않았습니다. 브라우저는 Next.js 같은 출처 프록시를 거칩니다(§14).
 
 ## 8. 관리자 계정 생성
 
@@ -261,8 +261,24 @@ java -jar build\libs\manhwanet-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 
 | 기능 | 필요한 것 | 시점 |
 |---|---|---|
-| Next.js 같은 출처 프록시(rewrites)·로그인/가입 화면·로그인 상태 표시 | Frontend 작업 | 다음 단계 |
 | 이메일 소유 인증, 비밀번호 재설정 | 메일 발송 서비스, 일회용 토큰·만료 정책 | **공개 운영 전 필수** |
 | 소셜 로그인 | OAuth 공급자 등록, `user_identities` | 수요 확인 후 |
 | 유출 비밀번호 외부 API 확인 | 외부 API 연동 | 공개 운영 전 검토 |
 | remember-me, MFA, 비밀번호 변경·탈퇴·정지, 감사 로그 | 정책 결정 | 후속 |
+
+## 14. 프론트엔드 (#12)
+
+| 항목 | 구현 |
+|---|---|
+| 같은 출처 프록시 | Route Handler `frontend/src/app/api/v1/[...path]/route.ts` → 서버 설정 `API_BASE_URL` 아래 같은 경로. 요청이 목적지를 고를 수 없음 |
+| rewrites 대신 Route Handler | `next.config` rewrites 는 빌드 시점에 목적지가 고정되고 모든 요청 헤더·쿠키를 넘깁니다. Route Handler 는 `API_BASE_URL`을 실행 시점에 읽고, 넘길 헤더·쿠키를 목록으로 제한합니다 |
+| 넘기는 요청 헤더 | `Accept`, `Accept-Language`, `Content-Type`, `X-XSRF-TOKEN`, 쿠키는 세션(`__Host-MANHWANET_SESSION`/`MANHWANET_SESSION`)·`XSRF-TOKEN`만 |
+| 돌려주는 응답 헤더 | `Set-Cookie`(모두), `Content-Type`, `Cache-Control`(없으면 `private, no-store`), `Expires`, `Pragma`, `Retry-After`, 같은 출처 `Location`. Location 은 URL 해석 후 기준 출처와 같을 때만 경로·query·해시를 넘긴다. 역슬래시·제어 문자·외부 출처·`//` 는 버린다. `/api/v1/...` 는 유지한다 |
+| 거절 | `.`·`..`·빈 세그먼트·역슬래시·인코딩된 슬래시 경로 404, 본문 64KiB 초과 413, Backend 연결 실패 503 `SERVICE_UNAVAILABLE` |
+| 서버 측 로그인 상태 | `getSession()`: 세션 쿠키만 골라 `GET /auth/me` (`no-store`, 3초 제한, React `cache`로 한 요청 안에서만 공유). 세션 쿠키가 없으면 호출하지 않음. 401 → 비로그인, 그 밖의 실패 → `unavailable` |
+| CSRF 흐름 | 변경 요청 직전에 `XSRF-TOKEN` 쿠키를 읽어 헤더로 보냄 → 쿠키가 없으면 `GET /auth/csrf` → `INVALID_CSRF_TOKEN`이면 토큰을 다시 받아 1회 재시도. 토큰을 따로 저장하지 않으므로 로그인·가입 후 교체된 토큰을 자동으로 사용 |
+| 응답 파싱 | 브라우저 응답도 `parseApiBody`(lossless-json)로 읽어 사용자 `id`를 원문 십진수 문자열로 유지 |
+| 화면 | `/login`, `/signup`(이미 로그인했으면 `returnTo`로 307), 헤더 닉네임·로그아웃 또는 로그인·회원가입 링크 |
+| returnTo | `/`로 시작하는 같은 출처 경로만. `//`, `\`, 스킴, 제어 문자, `/login`·`/signup`·`/api/` → `/works` |
+| 입력 검사 | 백엔드와 같은 기준으로 미리 안내(이메일 형식, 닉네임 2~30 코드 포인트, 비밀번호 NFKC 후 15~128 코드 포인트). 차단 목록 등 최종 판정은 백엔드 `fieldErrors`를 해당 입력 칸에 연결 |
+| 범위 밖 | 비밀번호 재설정, 소셜 로그인, 관리자 등록 화면. HTTPS·프록시 운영 검증은 #11 |

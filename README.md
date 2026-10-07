@@ -4,8 +4,8 @@
 
 > **현재 단계: Phase 2 — 작품·작가 등록/조회**
 > 작품(Work·WorkTitle)과 작가(Creator·WorkCreator)의 등록·조회 API가 구현되어 있습니다. ([명세](docs/work-creator-spec.md))
-> Frontend에서 작품 목록(`/works`)과 상세(`/works/[id]`)를 볼 수 있습니다.
-> 회원, 인증, 별점, 리뷰, 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
+> Frontend에서 작품 목록(`/works`)과 상세(`/works/[id]`)를 보고, 가입(`/signup`)·로그인(`/login`)·로그아웃할 수 있습니다.
+> 별점, 리뷰, 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
 > 공통 기반(빌드, DB 연결, 마이그레이션, 공통 응답/예외 처리, 테스트 환경) 위에 작품·작가 등록·조회 API가 구현되어 있습니다.
 
 ## 기술 스택
@@ -45,11 +45,12 @@ manhwanet/
 │       │   └── db/migration/        # Flyway 마이그레이션 (V1__init, V2__create_work_and_creator_tables)
 │       └── test/java/com/manhwanet/
 ├── frontend/                        # Next.js + TypeScript + App Router
-│   ├── src/app/                     # 화면 (/, /works, /works/[id]) — error / not-found 포함
-│   ├── src/components/              # 크레딧, 페이지 이동, 상태 안내
-│   ├── src/lib/api/                 # 서버 전용 API 클라이언트와 응답 타입
+│   ├── src/app/                     # 화면 (/, /works, /works/[id], /login, /signup) — error / not-found 포함
+│   ├── src/app/api/v1/[...path]/    # 같은 출처 API 프록시 (→ API_BASE_URL)
+│   ├── src/components/              # 크레딧, 페이지 이동, 상태 안내, 로그인 폼·헤더(auth/)
+│   ├── src/lib/api/                 # 서버 전용 API 클라이언트, 응답 타입, 무손실 JSON 파서, 프록시 규칙
+│   ├── src/lib/auth/                # 로그인 상태 조회, 브라우저 인증 API(CSRF), returnTo, 입력 검사
 │   ├── src/lib/works/               # URL 파라미터 해석, 표시용 라벨
-│   ├── src/config/env.ts            # 브라우저용 환경변수 접근 (현재 미사용)
 │   └── .env.example
 ├── docker/postgres/init/            # PostgreSQL 최초 기동 시 실행 스크립트 (테스트 DB 생성)
 ├── docs/                            # 설계 문서
@@ -178,9 +179,18 @@ npm run dev
 | `/` | 첫 화면, 작품 목록으로 이동 |
 | `/works?page=N` | 작품 목록 (대표 제목, 작품 형식, 작가 크레딧, 20개씩 페이지 이동). `page`는 **1부터** 시작하며 생략하면 1페이지 |
 | `/works/{id}?from=N` | 작품 상세 (대표·다른 제목, 작가 역할, 국가, 줄거리). `from`은 "작품 목록으로" 링크가 돌아갈 목록 페이지 |
+| `/login?returnTo=경로` | 로그인 (이메일·비밀번호). 성공하면 `returnTo`, 없으면 `/works`로 이동 |
+| `/signup?returnTo=경로` | 회원가입 (이메일·닉네임·비밀번호). 가입과 동시에 로그인됨 |
 
-- API 호출은 **서버(Server Component)에서만** 합니다. 브라우저가 Backend를 직접 호출하지 않으므로 Backend CORS 설정이 필요 없습니다.
+- 작품 조회는 **서버(Server Component)**에서 `API_BASE_URL`로 직접 호출합니다.
+- 브라우저의 인증 요청(가입·로그인·로그아웃·상태 확인)은 **같은 출처 `/api/v1/**`**로 보내고, Next.js Route Handler(`src/app/api/v1/[...path]/route.ts`)가 서버 설정 `API_BASE_URL` 아래 같은 경로로만 전달합니다. 브라우저가 Backend를 직접 호출하지 않으므로 Backend CORS 설정이 필요 없습니다.
+  - 넘기는 것: `Accept`, `Accept-Language`, `Content-Type`, `X-XSRF-TOKEN`, 세션·`XSRF-TOKEN` 쿠키. 돌려주는 것: 상태 코드, 본문, `Set-Cookie`(모두), `Content-Type`, `Cache-Control`, `Retry-After`, 같은 출처 `Location`
+  - `.`·`..`·인코딩된 슬래시가 든 경로와 64KiB를 넘는 본문은 거절합니다. Backend에 연결하지 못하면 503 `SERVICE_UNAVAILABLE`입니다.
+- 헤더의 로그인 상태는 요청마다 서버에서 `GET /auth/me`로 확인합니다(세션 쿠키만 전달, `no-store`). Backend 장애일 때는 로그아웃으로 표시하지 않고 "로그인 상태를 확인하지 못했습니다"를 보여 줍니다. 로그인 상태에서 화면을 옮기거나 탭으로 돌아오면 다시 확인하고, 세션이 만료되었으면 안내합니다.
+- CSRF: 변경 요청 직전에 `XSRF-TOKEN` 쿠키를 읽어 `X-XSRF-TOKEN` 헤더로 보냅니다. 쿠키가 없으면 `GET /api/v1/auth/csrf`로 받고, `INVALID_CSRF_TOKEN`이면 한 번만 다시 받아 재시도합니다. 토큰·비밀번호는 localStorage, URL, 로그에 남기지 않습니다.
+- `returnTo`는 같은 사이트 내부 경로(`/`로 시작, `//`·`\`·스킴·제어 문자 없음)만 허용하며, 그 밖의 값은 `/works`로 바꿉니다.
 - 캐시 정책: 모든 조회는 `fetch(..., { cache: "no-store" })`로 요청마다 Backend에서 새로 읽습니다. `/works`, `/works/[id]`는 동적 렌더링(`ƒ`)이며 응답에 `Cache-Control: private, no-cache, no-store`가 붙습니다. 새로 등록한 작품은 새로고침하면 바로 보입니다.
+- 세션 쿠키를 읽기 때문에 모든 화면이 동적 렌더링(`ƒ`)입니다.
 - 상태 화면: 등록된 작품 없음, 범위 밖 페이지, API 연결 실패(다시 시도 링크), 없는 작품(404 안내)
 - 정상 목록·상세는 HTTP 200입니다. 없는 작품과 잘못된 작품 ID는 404이고, 잘못된 `page`와 중복 `page`는 `/works`로 307 리다이렉트됩니다. 없는 작품 화면에는 `noindex`가 붙습니다.
 - 작품 `id`와 작가 `creatorId`는 JSON 숫자로 오지만, 서버에서 원문 십진수 문자열로 읽어 링크에 사용합니다. 페이지 번호와 개수는 기존 숫자 타입입니다.
@@ -225,6 +235,7 @@ cd backend
 
 ```bash
 cd frontend
+npm test                                  # src/**/*.test.ts (JSON 무손실 파싱, 프록시 규칙, returnTo, 입력 검사, 오류 안내)
 npm run lint
 npm run build
 ```
@@ -251,11 +262,10 @@ npm run build
 
 | 이름 | 설명 | 기본값 |
 | --- | --- | --- |
-| `API_BASE_URL` | 서버가 호출할 Backend API 주소. 실행 시점에 읽으며 브라우저에 노출되지 않음 | `http://127.0.0.1:8080/api/v1` |
-| `NEXT_PUBLIC_API_BASE_URL` | 브라우저용 Backend API 주소 (현재 화면에서는 사용하지 않음) | `http://localhost:8080/api/v1` |
+| `API_BASE_URL` | 서버 조회와 같은 출처 프록시가 호출할 Backend API 주소. 실행 시점에 읽으며 브라우저에 노출되지 않음 | `http://127.0.0.1:8080/api/v1` |
 
 - `local` 프로필 Backend는 127.0.0.1에만 바인딩되므로 `API_BASE_URL`은 `localhost` 대신 `127.0.0.1`을 권장합니다. (`localhost`가 IPv6 `::1`로 먼저 해석되면 연결되지 않을 수 있습니다)
-- `NEXT_PUBLIC_` 값은 브라우저 번들에 포함되므로 secret을 넣지 않습니다. 코드에서는 `src/config/env.ts`의 `env.apiBaseUrl`로 접근합니다.
+- 브라우저용 API 주소(`NEXT_PUBLIC_API_BASE_URL`)는 두지 않습니다. 브라우저는 항상 같은 출처 `/api/v1/**`를 호출합니다.
 
 ## API
 
