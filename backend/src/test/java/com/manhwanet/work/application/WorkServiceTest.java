@@ -32,7 +32,8 @@ class WorkServiceTest {
     private final WorkRepository workRepository = mock(WorkRepository.class);
     private final CreatorService creatorService = mock(CreatorService.class);
     private final WorkService workService = new WorkService(
-            workRepository, mock(WorkTitleRepository.class), mock(WorkCreatorRepository.class), creatorService);
+            workRepository, mock(WorkTitleRepository.class), mock(WorkCreatorRepository.class), creatorService,
+            mock(WorkRatingSummaryQuery.class));
 
     private final CreateWorkRequest request = new CreateWorkRequest(
             "WEBTOON", null, null,

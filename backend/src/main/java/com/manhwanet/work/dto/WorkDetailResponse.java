@@ -12,6 +12,7 @@ public record WorkDetailResponse(
         PrimaryTitleResponse primaryTitle,
         List<WorkTitleResponse> titles,
         List<CreditResponse> creators,
+        RatingSummaryResponse rating,
         Instant createdAt,
         Instant updatedAt) {
 }

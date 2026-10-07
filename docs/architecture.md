@@ -5,7 +5,8 @@
 - 하나의 Spring Boot 애플리케이션으로 배포합니다. (Microservice 아님)
 - 도메인별 최상위 패키지로 모듈을 나눕니다: `com.manhwanet.<domain>`
 - 예정 도메인: `auth`, `user`, `work`, `creator`, `genre`, `platform`, `rating`, `review`, `comment`, `ranking`, `search`, `report`, `admin`, `global`
-- 구현된 패키지: `global`(공통 설정·응답·예외·health·페이지·시각), `creator`, `work` ([명세](work-creator-spec.md))
+- 구현된 패키지: `global`(공통 설정·응답·예외·health·페이지·시각·보안), `creator`, `work` ([명세](work-creator-spec.md)), `user`, `auth` ([명세](auth-design-draft.md)), `rating` ([명세](rating-design-draft.md))
+- `rating → work` 방향만 허용합니다. `work`가 목록·상세에 별점 집계를 넣을 때는 `work.application.WorkRatingSummaryQuery`(메서드 1개)를 `rating`이 구현해 순환을 막습니다.
 - 나머지 도메인 패키지는 **기능을 실제로 구현할 때** 만듭니다.
 - 도메인 내부는 `api`(Controller), `application`(Service, 다른 도메인에 공개하는 타입), `domain`(Entity, Repository, 도메인 규칙), `dto`(요청·응답)로 나눕니다.
 - 다른 도메인의 Entity는 JPA 연관관계로 참조하지 않고 ID 값으로 참조합니다. DB 외래 키는 유지합니다. (예: `WorkCreator.creatorId`)

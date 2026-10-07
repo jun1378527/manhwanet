@@ -25,6 +25,7 @@ import com.manhwanet.work.domain.WorkTitleRepository;
 import com.manhwanet.work.dto.CreateWorkRequest;
 import com.manhwanet.work.dto.CreditResponse;
 import com.manhwanet.work.dto.PrimaryTitleResponse;
+import com.manhwanet.work.dto.RatingSummaryResponse;
 import com.manhwanet.work.dto.WorkDetailResponse;
 import com.manhwanet.work.dto.WorkSummaryResponse;
 import com.manhwanet.work.dto.WorkTitleResponse;
@@ -65,16 +66,19 @@ public class WorkService {
     private final WorkTitleRepository workTitleRepository;
     private final WorkCreatorRepository workCreatorRepository;
     private final CreatorService creatorService;
+    private final WorkRatingSummaryQuery ratingSummaryQuery;
 
     public WorkService(
             WorkRepository workRepository,
             WorkTitleRepository workTitleRepository,
             WorkCreatorRepository workCreatorRepository,
-            CreatorService creatorService) {
+            CreatorService creatorService,
+            WorkRatingSummaryQuery ratingSummaryQuery) {
         this.workRepository = workRepository;
         this.workTitleRepository = workTitleRepository;
         this.workCreatorRepository = workCreatorRepository;
         this.creatorService = creatorService;
+        this.ratingSummaryQuery = ratingSummaryQuery;
     }
 
     @Transactional
@@ -92,18 +96,27 @@ public class WorkService {
         }
 
         Work work = save(Work.create(workFormat, originCountry, description, titles, credits));
-        return toDetail(work);
+        // 새 작품에는 별점이 없으므로 집계 SQL 을 실행하지 않는다.
+        return toDetail(work, RatingSummaryResponse.EMPTY);
     }
 
     public WorkDetailResponse getWork(Long workId) {
         Work work = workRepository.findWithTitlesById(workId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.WORK_NOT_FOUND));
-        return toDetail(work);
+        RatingSummaryResponse rating = ratingSummaryQuery.findByWorkIds(List.of(work.getId()))
+                .getOrDefault(work.getId(), RatingSummaryResponse.EMPTY);
+        return toDetail(work, rating);
+    }
+
+    /** 작품 존재 여부. 다른 도메인(rating)이 작품 ID를 검증할 때 사용한다. */
+    public boolean exists(Long workId) {
+        return workId != null && workId > 0 && workRepository.existsById(workId);
     }
 
     /**
      * 목록 조회. 컬렉션 fetch join 과 페이징을 결합하지 않고,
-     * 작품 페이지 조회 후 대표 제목·크레딧·작가를 페이지 단위로 일괄 조회한다.
+     * 작품 페이지 조회 후 대표 제목·크레딧·작가·별점 집계를 페이지 단위로 일괄 조회한다.
+     * 빈 페이지는 연관 조회와 집계를 모두 생략한다.
      */
     public PageResponse<WorkSummaryResponse> getWorks(Pageable pageable) {
         Page<Work> page = workRepository.findAll(pageable);
@@ -118,6 +131,7 @@ public class WorkService {
                 .collect(Collectors.groupingBy(CreditView::workId));
         Map<Long, CreatorSummary> creators = creatorService.getSummaries(
                 creditsByWork.values().stream().flatMap(List::stream).map(CreditView::creatorId).toList());
+        Map<Long, RatingSummaryResponse> ratings = ratingSummaryQuery.findByWorkIds(workIds);
 
         List<WorkSummaryResponse> content = page.getContent().stream()
                 .map(work -> {
@@ -135,6 +149,7 @@ public class WorkService {
                             work.getOriginCountry(),
                             new PrimaryTitleResponse(primary.title(), primary.languageCode()),
                             credits,
+                            ratings.getOrDefault(work.getId(), RatingSummaryResponse.EMPTY),
                             work.getCreatedAt());
                 })
                 .toList();
@@ -153,7 +168,7 @@ public class WorkService {
         }
     }
 
-    private WorkDetailResponse toDetail(Work work) {
+    private WorkDetailResponse toDetail(Work work, RatingSummaryResponse rating) {
         List<WorkTitle> sortedTitles = work.getTitles().stream()
                 .sorted(Comparator.comparing((WorkTitle title) -> !title.isPrimary())
                         .thenComparing(WorkTitle::getId))
@@ -181,6 +196,7 @@ public class WorkService {
                         .map(title -> new WorkTitleResponse(title.getTitle(), title.getLanguageCode(), title.isPrimary()))
                         .toList(),
                 credits,
+                rating,
                 work.getCreatedAt(),
                 work.getUpdatedAt());
     }

@@ -5,7 +5,8 @@
 > **현재 단계: Phase 2 — 작품·작가 등록/조회**
 > 작품(Work·WorkTitle)과 작가(Creator·WorkCreator)의 등록·조회 API가 구현되어 있습니다. ([명세](docs/work-creator-spec.md))
 > Frontend에서 작품 목록(`/works`)과 상세(`/works/[id]`)를 보고, 가입(`/signup`)·로그인(`/login`)·로그아웃할 수 있습니다.
-> 별점, 리뷰, 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
+> 별점 백엔드 API(내 별점 등록·수정·삭제, 작품 목록·상세의 평균·참여자 수)가 구현되어 있습니다. ([명세](docs/rating-design-draft.md)) 별점 화면은 아직 없습니다.
+> 리뷰, 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
 > 공통 기반(빌드, DB 연결, 마이그레이션, 공통 응답/예외 처리, 테스트 환경) 위에 작품·작가 등록·조회 API가 구현되어 있습니다.
 
 ## 기술 스택
@@ -224,7 +225,11 @@ cd backend
 | `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |
 | `SessionCookieHttpTest`, `LocalSessionCookieHttpTest` | 실제 HTTP 응답의 쿠키 속성(`__Host-`, local), 세션 흐름, ERROR 디스패치, loopback 바인딩 | O |
 | `CreatorApiIntegrationTest`, `WorkApiIntegrationTest` | 등록·조회 API 전체 흐름, 입력 오류, 정렬·페이징 | O |
-| `WorkQueryCountTest` | 데이터가 늘어도 목록·상세 조회 SQL 수가 늘지 않음 (N+1 회귀) | O |
+| `WorkQueryCountTest` | 데이터(작품·제목·작가·별점)가 늘어도 목록·상세 조회 SQL 수가 늘지 않음, 빈 페이지는 별점 집계 생략 (N+1 회귀) | O |
+| `RatingScoreTest`, `RatingAverageTest` | 점수 경계·0.5 단위·정확한 소수, 평균 HALF_UP | X |
+| `WorkRatingMigrationTest` | V4 적용, 유니크·CHECK·FK(작품 CASCADE, 사용자 RESTRICT) | O |
+| `RatingApiIntegrationTest` | 내 별점 GET·PUT·DELETE, 시각 정책, 점수 검증(문자열·null 거절), 401·403·404, USER·ADMIN 격리, 공개 집계·반올림, 큰 ID | O |
+| `RatingConcurrencyTest`, `RatingRollbackTest` | 동시 PUT, PUT·DELETE 경쟁(트랜잭션 순서 재현 포함), 롤백, FK 위반 → 404 | O |
 
 - 통합 테스트는 테스트 DB 이름이 `_test`로 끝나고 `DB_NAME`과 다른지 확인한 뒤, `TRUNCATE` 직전에 `current_database()`가 그 이름과 같은지 다시 확인합니다. 이름이 같거나, 비어 있거나, 접미사가 없으면 정리를 거절합니다. `_test` 접미사는 안전장치이며, 그 DB의 과거 용도를 증명하지는 않습니다.
 - 등록 API 통합 테스트는 ADMIN 사용자와 CSRF 토큰으로 요청합니다(spring-security-test).
@@ -281,11 +286,15 @@ npm run build
 | POST | `/api/v1/auth/login` | 로그인 |
 | POST | `/api/v1/auth/logout` | 로그아웃 |
 | GET | `/api/v1/auth/me` | 현재 사용자 (로그인 필요) |
+| GET | `/api/v1/me/ratings/{workId}` | 내 별점 (로그인 필요). 평가하지 않았으면 `score: null` |
+| PUT | `/api/v1/me/ratings/{workId}` | 내 별점 등록·수정 `{"score": 4.5}` (0.5~5.0, 0.5 단위) |
+| DELETE | `/api/v1/me/ratings/{workId}` | 내 별점 삭제 (204, 반복 가능) |
 | POST | `/api/v1/admin/works` | 작품 등록 (ADMIN) |
 | POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN) |
 
 - 페이지: `page` 0부터(기본 0), `size` 1~100(기본 20), `sort`는 `createdAt` 또는 `id`에 `,asc`/`,desc` (기본 `createdAt,desc` + `id,desc`). 범위 밖 값이나 허용하지 않은 정렬은 400입니다.
-- 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md)를 참고하세요.
+- 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md), 별점은 [docs/rating-design-draft.md](docs/rating-design-draft.md)를 참고하세요.
+- 작품 목록·상세 응답에는 `rating: { average, count }`가 있습니다. `average`는 소수 첫째 자리(HALF_UP)이고 별점이 없으면 `null`입니다.
 - POST 등 변경 요청은 `XSRF-TOKEN` 쿠키 값을 `X-XSRF-TOKEN` 헤더로 보내야 합니다. 공개 GET(작품·작가·health) 외의 경로는 로그인이 필요합니다.
 
 ## API 공통 규약

@@ -10,5 +10,6 @@ public record WorkSummaryResponse(
         String originCountry,
         PrimaryTitleResponse primaryTitle,
         List<CreditResponse> creators,
+        RatingSummaryResponse rating,
         Instant createdAt) {
 }
