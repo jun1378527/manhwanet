@@ -165,12 +165,15 @@ work   ──✗ rating  (work 는 rating 을 import 하지 않음)
 | 없는 작품, `workId` ≤ 0 (GET·PUT·DELETE) | 404 | `WORK_NOT_FOUND` |
 | `workId`가 숫자가 아니거나 Long 범위 밖 | 400 | `INVALID_INPUT` (`fieldErrors[workId]`) |
 | 점수 오류(§1.1) | 400 | `INVALID_INPUT` (`fieldErrors[score]`) |
+| `X-Expected-User-Id` 누락(PUT·DELETE)·형식 오류 | 400 | `INVALID_INPUT` (`fieldErrors[expectedUserId]`) |
+| `X-Expected-User-Id`가 이 요청의 세션 사용자와 다름 | 409 | `USER_MISMATCH` (아무것도 바꾸지 않음) |
 
 - 존재 확인과 저장 사이에 작품이 삭제되면 FK `fk_work_ratings_work` 위반이 납니다. **[기존]** 예상한 이름의 제약만 변환하는 규칙에 따라 이 제약만 404 `WORK_NOT_FOUND`로 바꾸고 나머지 무결성 오류는 500으로 둡니다.
 
 ### 4.4 권한
 
 - USER와 ADMIN 모두 자기 별점만 조회·변경합니다. 다른 사용자 별점을 다루는 API는 없습니다.
+- PUT·DELETE는 헤더 `X-Expected-User-Id`(화면을 렌더링한 사용자 ID, 십진수 문자열)가 필수입니다. 값은 이 요청의 세션 사용자와 비교하는 데만 쓰고, 별점 소유자는 세션 사용자입니다. 다르면 409 `USER_MISMATCH`이고 어느 계정의 별점도 바꾸지 않습니다. GET은 헤더가 있을 때만 확인합니다.
 - ADMIN의 별점도 집계에 포함합니다.
 
 ---

@@ -95,6 +95,7 @@ describe("ratingFailure", () => {
 
   it("maps outcomes", () => {
     assert.deepEqual(ratingFailure({ kind: "unavailable" }), { kind: "unknown-outcome" });
+    assert.deepEqual(ratingFailure(error(409, "USER_MISMATCH")), { kind: "account-switched" });
     assert.deepEqual(ratingFailure(error(401, "UNAUTHORIZED")), { kind: "session-expired" });
     assert.equal(ratingFailure(error(403, "INVALID_CSRF_TOKEN")).kind, "message");
     assert.deepEqual(ratingFailure(error(400, "INVALID_INPUT", [{ field: "score", reason: "별점은 숫자여야 합니다." }])), {

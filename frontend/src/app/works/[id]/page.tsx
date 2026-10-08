@@ -1,15 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { CreditList } from "@/components/CreditList";
 import { WorkRatingSection } from "@/components/ratings/WorkRatingSection";
+import { WorkReviewSection } from "@/components/reviews/WorkReviewSection";
 import { ApiUnavailable } from "@/components/StatusMessage";
 import { getWork } from "@/lib/api/works";
 import { getSession } from "@/lib/auth/session";
 import { type MyRatingState, getMyRating } from "@/lib/ratings/server";
+import { type MyReviewState, getMyReview, getReviewPage } from "@/lib/reviews/server";
 import { WORK_FORMAT_LABELS, countryLabel, languageLabel } from "@/lib/works/labels";
-import { isValidWorkId, parseReturnPage, workDetailHref, worksListHref } from "@/lib/works/params";
+import { isValidWorkId, parseListPage, parseReturnPage, workDetailHref, worksListHref } from "@/lib/works/params";
 
 export async function generateMetadata({ params }: PageProps<"/works/[id]">): Promise<Metadata> {
   const { id } = await params;
@@ -22,14 +24,22 @@ export async function generateMetadata({ params }: PageProps<"/works/[id]">): Pr
 
 export default async function WorkDetailPage({ params, searchParams }: PageProps<"/works/[id]">) {
   const { id } = await params;
-  const { from } = await searchParams;
-  const listHref = worksListHref(parseReturnPage(from));
+  const { from, reviewPage: reviewPageParam } = await searchParams;
+  const fromPage = parseReturnPage(from);
+  const listHref = worksListHref(fromPage);
 
   if (!isValidWorkId(id)) {
     notFound();
   }
-  // 작품과 내 별점(로그인했을 때만)을 함께 불러온다. 내 별점은 사용자별 응답이므로 캐시하지 않는다.
-  const [result, { myRating, viewerKey }] = await Promise.all([getWork(id), loadMyRating(id)]);
+  // 공개 리뷰 페이지(?reviewPage, 1부터). 잘못된 값·중복 값은 reviewPage 를 뺀 주소로 보낸다(307). from 은 보존한다.
+  const reviewPage = parseListPage(reviewPageParam);
+  if (reviewPage === null) {
+    redirect(workDetailHref(id, fromPage));
+  }
+  // 작품, 내 별점·내 리뷰(로그인했을 때만), 공개 리뷰 목록을 함께 불러온다.
+  // 내 별점·내 리뷰는 사용자별 응답이므로 캐시하지 않는다. 공개 목록은 쿠키 없이 읽는다.
+  const [result, viewer, reviewList] = await Promise.all([getWork(id), loadViewer(id), getReviewPage(id, reviewPage - 1)]);
+  const { myRating, viewerKey } = viewer;
   if (!result.ok) {
     if (result.reason === "not-found") {
       notFound();
@@ -37,7 +47,7 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
     return (
       <>
         <BackLink href={listHref} />
-        <ApiUnavailable retryHref={`/works/${id}${from ? `?from=${parseReturnPage(from)}` : ""}`} />
+        <ApiUnavailable retryHref={workDetailHref(id, fromPage, reviewPage)} />
       </>
     );
   }
@@ -72,7 +82,18 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
         workId={work.id}
         initialSummary={work.rating}
         initialMine={myRating}
-        selfHref={workDetailHref(work.id, parseReturnPage(from))}
+        selfHref={workDetailHref(work.id, fromPage, reviewPage)}
+        viewerId={viewer.viewerId}
+      />
+
+      <WorkReviewSection
+        key={viewer.reviewViewerKey}
+        workId={work.id}
+        viewerId={viewer.viewerId}
+        initialMine={viewer.myReview}
+        initialList={reviewList}
+        reviewPage={reviewPage}
+        fromPage={fromPage}
       />
 
       <section aria-labelledby="credits-heading">
@@ -109,16 +130,37 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
 }
 
 /**
- * 로그인 상태에 따라 내 별점을 불러온다. 백엔드 장애는 비로그인으로 바꾸지 않는다.
- * viewerKey: 로그인·로그아웃 후(router.refresh) 사용자나 상태가 바뀌면 별점 영역을 새 상태로 다시 만들기 위한 key
+ * 로그인 상태에 따라 내 별점·내 리뷰를 불러온다. 백엔드 장애는 비로그인으로 바꾸지 않는다.
+ * - viewerKey: 로그인·로그아웃 후(router.refresh) 사용자나 상태가 바뀌면 별점 영역을 새 상태로 다시 만들기 위한 key
+ * - reviewViewerKey: 리뷰 영역용 key. 사용자(또는 비로그인·확인 실패 상태)가 바뀔 때만 바뀐다.
+ *   내 리뷰 조회 결과가 바뀌어도 key 를 바꾸지 않아, 작성 중인 글이 router.refresh 로 사라지지 않는다.
+ *   사용자가 바뀌면 key 가 바뀌어 이전 사용자의 글·응답이 남지 않는다.
  */
-async function loadMyRating(workId: string): Promise<{ myRating: MyRatingState; viewerKey: string }> {
+async function loadViewer(workId: string): Promise<{
+  myRating: MyRatingState;
+  viewerKey: string;
+  myReview: MyReviewState;
+  reviewViewerKey: string;
+  viewerId: string | null;
+}> {
   const session = await getSession();
   if (session.status !== "authenticated") {
-    return { myRating: { status: session.status }, viewerKey: session.status };
+    return {
+      myRating: { status: session.status },
+      viewerKey: session.status,
+      myReview: { status: session.status },
+      reviewViewerKey: session.status,
+      viewerId: null,
+    };
   }
-  const myRating = await getMyRating(workId);
-  return { myRating, viewerKey: `${session.user.id}:${myRating.status}` };
+  const [myRating, myReview] = await Promise.all([getMyRating(workId), getMyReview(workId)]);
+  return {
+    myRating,
+    viewerKey: `${session.user.id}:${myRating.status}`,
+    myReview,
+    reviewViewerKey: `user:${session.user.id}`,
+    viewerId: session.user.id,
+  };
 }
 
 function BackLink({ href }: { href: string }) {

@@ -38,6 +38,18 @@ export function worksListHref(page: number): string {
   return page > 1 ? `/works?page=${page}` : "/works";
 }
 
-export function workDetailHref(id: string, fromPage: number): string {
-  return fromPage > 1 ? `/works/${id}?from=${fromPage}` : `/works/${id}`;
+/**
+ * 작품 상세 주소. from(작품 목록 복귀 페이지)과 reviewPage(공개 리뷰 페이지, 1부터)는 1이면 생략한다.
+ * 순서는 from → reviewPage 로 고정한다.
+ */
+export function workDetailHref(id: string, fromPage: number, reviewPage = 1): string {
+  const query = new URLSearchParams();
+  if (fromPage > 1) {
+    query.set("from", String(fromPage));
+  }
+  if (reviewPage > 1) {
+    query.set("reviewPage", String(reviewPage));
+  }
+  const text = query.toString();
+  return text ? `/works/${id}?${text}` : `/works/${id}`;
 }

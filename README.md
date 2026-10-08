@@ -6,7 +6,7 @@
 > 작품(Work·WorkTitle)과 작가(Creator·WorkCreator)의 등록·조회 API가 구현되어 있습니다. ([명세](docs/work-creator-spec.md))
 > Frontend에서 작품 목록(`/works`)과 상세(`/works/[id]`)를 보고, 가입(`/signup`)·로그인(`/login`)·로그아웃할 수 있습니다.
 > 작품 별점(내 별점 등록·수정·삭제, 작품 목록·상세의 평균·참여자 수)을 API와 화면에서 쓸 수 있습니다. ([명세](docs/rating-design-draft.md))
-> 작품 리뷰(내 리뷰 작성·수정·삭제, 작품별 공개 목록)는 API만 구현되어 있고 화면은 아직 없습니다. ([명세](docs/review-design-draft.md))
+> 작품 리뷰(내 리뷰 작성·수정·삭제, 작품별 공개 목록)를 API와 작품 상세 화면에서 쓸 수 있습니다. ([명세](docs/review-design-draft.md))
 > 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
 > 공통 기반(빌드, DB 연결, 마이그레이션, 공통 응답/예외 처리, 테스트 환경) 위에 작품·작가 등록·조회 API가 구현되어 있습니다.
 
@@ -180,15 +180,16 @@ npm run dev
 | --- | --- |
 | `/` | 첫 화면, 작품 목록으로 이동 |
 | `/works?page=N` | 작품 목록 (대표 제목, 작품 형식, 작가 크레딧, 20개씩 페이지 이동). `page`는 **1부터** 시작하며 생략하면 1페이지 |
-| `/works/{id}?from=N` | 작품 상세 (대표·다른 제목, 작가 역할, 국가, 줄거리). `from`은 "작품 목록으로" 링크가 돌아갈 목록 페이지 |
+| `/works/{id}?from=N&reviewPage=M` | 작품 상세 (대표·다른 제목, 작가 역할, 국가, 줄거리, 별점, 리뷰). `from`은 "작품 목록으로" 링크가 돌아갈 목록 페이지, `reviewPage`는 공개 리뷰 페이지(1부터, 10개씩) |
 | `/login?returnTo=경로` | 로그인 (이메일·비밀번호). 성공하면 `returnTo`, 없으면 `/works`로 이동 |
 | `/signup?returnTo=경로` | 회원가입 (이메일·닉네임·비밀번호). 가입과 동시에 로그인됨 |
 
 - 작품 목록·상세에 별점 평균과 참여자 수를 표시합니다(없으면 "아직 평가가 없습니다"). 상세에서 로그인한 사용자는 0.5~5.0점을 골라 "저장" 버튼으로 등록·변경하고 삭제할 수 있습니다. 상세 동작은 [docs/rating-design-draft.md](docs/rating-design-draft.md) §7을 참고하세요.
+- 작품 상세에 공개 리뷰 목록(닉네임, 작성·수정 시각 Asia/Seoul, 스포일러는 "내용 보기"를 눌러야 표시)과 내 리뷰 영역이 있습니다. 로그인한 사용자는 제목 없는 일반 텍스트(10~2,000자)를 "등록"·"수정 저장" 버튼으로 저장하고, 확인 후 삭제할 수 있습니다. 다른 탭에서 먼저 바뀌었으면 작성 중인 글을 지우지 않고 최신 리뷰와 함께 선택지를 보여 줍니다. 상세 동작은 [docs/review-design-draft.md](docs/review-design-draft.md) §6을 참고하세요.
 
 - 작품 조회는 **서버(Server Component)**에서 `API_BASE_URL`로 직접 호출합니다.
 - 브라우저의 인증 요청(가입·로그인·로그아웃·상태 확인)은 **같은 출처 `/api/v1/**`**로 보내고, Next.js Route Handler(`src/app/api/v1/[...path]/route.ts`)가 서버 설정 `API_BASE_URL` 아래 같은 경로로만 전달합니다. 브라우저가 Backend를 직접 호출하지 않으므로 Backend CORS 설정이 필요 없습니다.
-  - 넘기는 것: `Accept`, `Accept-Language`, `Content-Type`, `X-XSRF-TOKEN`, 세션·`XSRF-TOKEN` 쿠키. 돌려주는 것: 상태 코드, 본문, `Set-Cookie`(모두), `Content-Type`, `Cache-Control`, `Retry-After`, 같은 출처 `Location`
+  - 넘기는 것: `Accept`, `Accept-Language`, `Content-Type`, `X-XSRF-TOKEN`, `X-Expected-User-Id`(리뷰·별점 변경의 예상 사용자), 세션·`XSRF-TOKEN` 쿠키. 돌려주는 것: 상태 코드, 본문, `Set-Cookie`(모두), `Content-Type`, `Cache-Control`, `Retry-After`, 같은 출처 `Location`
   - `.`·`..`·인코딩된 슬래시가 든 경로와 64KiB를 넘는 본문은 거절합니다. Backend에 연결하지 못하면 503 `SERVICE_UNAVAILABLE`입니다.
 - 헤더의 로그인 상태는 요청마다 서버에서 `GET /auth/me`로 확인합니다(세션 쿠키만 전달, `no-store`). Backend 장애일 때는 로그아웃으로 표시하지 않고 "로그인 상태를 확인하지 못했습니다"를 보여 줍니다. 로그인 상태에서 화면을 옮기거나 탭으로 돌아오면 다시 확인하고, 세션이 만료되었으면 안내합니다.
 - CSRF: 변경 요청 직전에 `XSRF-TOKEN` 쿠키를 읽어 `X-XSRF-TOKEN` 헤더로 보냅니다. 쿠키가 없으면 `GET /api/v1/auth/csrf`로 받고, `INVALID_CSRF_TOKEN`이면 한 번만 다시 받아 재시도합니다. 토큰·비밀번호는 localStorage, URL, 로그에 남기지 않습니다.
@@ -232,12 +233,14 @@ cd backend
 | `RatingScoreTest`, `RatingAverageTest` | 점수 경계·0.5 단위·정확한 소수, 평균 HALF_UP | X |
 | `WorkRatingMigrationTest` | V4 적용, 유니크·CHECK·FK(작품 CASCADE, 사용자 RESTRICT) | O |
 | `RatingApiIntegrationTest` | 내 별점 GET·PUT·DELETE, 시각 정책, 점수 검증(문자열·null 거절), 401·403·404, USER·ADMIN 격리, 공개 집계·반올림, 큰 ID | O |
+| `RatingExpectedUserIntegrationTest` | 별점 `X-Expected-User-Id` 필수·형식, 계정 전환 뒤 PUT·DELETE·GET 409 `USER_MISMATCH` 와 무변경, 큰 사용자 ID 정확 비교 | O |
 | `RatingConcurrencyTest`, `RatingRollbackTest` | 동시 PUT, PUT·DELETE 경쟁(트랜잭션 순서 재현 포함), 롤백, FK 위반 → 404 | O |
 | `ReviewBodyTest` | 리뷰 본문 정규화: 코드 포인트 경계(이모지·조합 문자), 앞뒤 공백, 줄바꿈 LF 통일, NUL·제어 문자 거절 | X |
 | `WorkReviewMigrationTest` | V5 적용, 유니크·본문 길이·공백·version·시각 CHECK, FK(작품 CASCADE, 사용자 RESTRICT), NUL 저장 불가 | O |
 | `ReviewApiIntegrationTest` | 공개 목록·내 리뷰 GET·POST·PUT·DELETE, 보안 규칙(익명 공개 GET·`/me` 401·CSRF 403), 입력 검증, `reviewId`+`version` 충돌, 삭제 후 재작성, USER·ADMIN 격리, 정렬·페이지, 공개 필드, 큰 ID·version | O |
 | `ReviewConcurrencyTest`, `ReviewRollbackTest` | 동시 작성, 같은 버전 동시 수정, 수정·삭제 경쟁, 잠금 대기 중 재작성(트랜잭션 순서 재현), 롤백, FK 위반 → 404 | O |
 | `ReviewQueryCountTest` | 리뷰·작성자 수가 늘어도 공개 목록 SQL 수가 같음, 닉네임 일괄 조회 1회, 빈 페이지는 닉네임 조회 생략 (N+1 회귀) | O |
+| `ReviewExpectedUserIntegrationTest` | `X-Expected-User-Id` 필수·형식, 계정 전환 뒤 요청(새 세션·유효 CSRF)의 POST·PUT·DELETE·GET 409 `USER_MISMATCH` 와 무변경, 입력 검증보다 먼저 확인, 큰 사용자 ID 정확 비교 (#22) | O |
 
 - 통합 테스트는 테스트 DB 이름이 `_test`로 끝나고 `DB_NAME`과 다른지 확인한 뒤, `TRUNCATE` 직전에 `current_database()`가 그 이름과 같은지 다시 확인합니다. 이름이 같거나, 비어 있거나, 접미사가 없으면 정리를 거절합니다. `_test` 접미사는 안전장치이며, 그 DB의 과거 용도를 증명하지는 않습니다.
 - 등록 API 통합 테스트는 ADMIN 사용자와 CSRF 토큰으로 요청합니다(spring-security-test).
@@ -248,7 +251,7 @@ cd backend
 
 ```bash
 cd frontend
-npm test                                  # src/**/*.test.ts (JSON 무손실 파싱, 프록시 규칙, 브라우저 API·CSRF·204, returnTo, 입력 검사, 별점 규칙, 오류 안내)
+npm test                                  # src/**/*.test.ts (JSON 무손실 파싱, 프록시 규칙, 브라우저 API·CSRF·204, returnTo, 입력 검사, 별점 규칙, 리뷰 본문·직렬화·충돌 판단·시각, 오류 안내)
 npm run lint
 npm run build
 ```
@@ -295,13 +298,15 @@ npm run build
 | POST | `/api/v1/auth/logout` | 로그아웃 |
 | GET | `/api/v1/auth/me` | 현재 사용자 (로그인 필요) |
 | GET | `/api/v1/me/ratings/{workId}` | 내 별점 (로그인 필요). 평가하지 않았으면 `score: null` |
-| PUT | `/api/v1/me/ratings/{workId}` | 내 별점 등록·수정 `{"score": 4.5}` (0.5~5.0, 0.5 단위) |
-| DELETE | `/api/v1/me/ratings/{workId}` | 내 별점 삭제 (204, 반복 가능) |
+| PUT | `/api/v1/me/ratings/{workId}` | 내 별점 등록·수정 `{"score": 4.5}` (0.5~5.0, 0.5 단위). 헤더 `X-Expected-User-Id` 필수 |
+| DELETE | `/api/v1/me/ratings/{workId}` | 내 별점 삭제 (204, 반복 가능). 헤더 `X-Expected-User-Id` 필수 |
 | GET | `/api/v1/works/{workId}/reviews` | 작품별 공개 리뷰 목록 (`page`, `size` 1~50 기본 10, 작성 시각 최신순) |
 | GET | `/api/v1/me/reviews/{workId}` | 내 리뷰 (로그인 필요). 작성하지 않았으면 `review: null` |
 | POST | `/api/v1/me/reviews/{workId}` | 내 리뷰 작성 `{"body", "containsSpoiler"}` (201, 이미 있으면 409) |
 | PUT | `/api/v1/me/reviews/{workId}` | 내 리뷰 수정 `{"reviewId", "version", "body", "containsSpoiler"}` (불일치 409) |
 | DELETE | `/api/v1/me/reviews/{workId}?reviewId=&version=` | 내 리뷰 삭제 (204, 리뷰가 없어도 204, 불일치 409) |
+
+- 내 리뷰 POST·PUT·DELETE 와 내 별점 PUT·DELETE 는 헤더 `X-Expected-User-Id`(화면을 렌더링한 사용자 ID, 십진수 문자열)가 필수입니다. 이 요청의 로그인 사용자와 다르면 409 `USER_MISMATCH` 로 아무것도 바꾸지 않습니다(계정 전환 중 다른 계정에 반영되는 것을 막음). 작성자·별점 소유자는 항상 세션 사용자입니다. 값은 일치 확인에만 씁니다.
 | POST | `/api/v1/admin/works` | 작품 등록 (ADMIN) |
 | POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN) |
 

@@ -7,8 +7,11 @@ import { PROXIED_COOKIE_NAMES, pickCookieHeader } from "../auth/cookies";
 
 export const PROXY_PREFIX = "/api/v1";
 
-/** 백엔드로 넘기는 요청 헤더 (Cookie 는 인증 쿠키만 따로 골라 넘긴다) */
-const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type", "x-xsrf-token"] as const;
+/**
+ * 백엔드로 넘기는 요청 헤더 (Cookie 는 인증 쿠키만 따로 골라 넘긴다)
+ * - x-expected-user-id: 리뷰·별점 변경 요청에서 화면이 예상한 사용자 ID. 백엔드가 같은 요청의 세션 사용자와 비교한다
+ */
+const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type", "x-xsrf-token", "x-expected-user-id"] as const;
 
 /** 브라우저로 돌려주는 응답 헤더 (Set-Cookie, Location 은 따로 처리한다) */
 const FORWARDED_RESPONSE_HEADERS = ["content-type", "cache-control", "expires", "pragma", "retry-after"] as const;

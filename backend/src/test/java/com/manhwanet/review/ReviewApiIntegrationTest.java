@@ -69,6 +69,8 @@ class ReviewApiIntegrationTest {
         adminAccountService.createAdmin(adminEmail, STRONG_PASSWORD, "관리자");
         admin = new AuthTestClient(mockMvc, objectMapper);
         assertThat(admin.login(adminEmail, STRONG_PASSWORD).getResponse().getStatus()).isEqualTo(200);
+        // 리뷰 변경 요청은 화면이 예상한 사용자 ID 헤더가 필요하다(#22). 각 클라이언트는 자기 ID를 보낸다
+        admin.withHeader("X-Expected-User-Id", String.valueOf(currentUserId(admin)));
         creatorId = createCreator("한서윤");
         workId = createWork("달빛 기사단");
     }
@@ -619,6 +621,7 @@ class ReviewApiIntegrationTest {
         AuthTestClient client = new AuthTestClient(mockMvc, objectMapper);
         MvcResult result = client.signup("reader-" + UUID.randomUUID() + "@manhwanet.test", STRONG_PASSWORD, nickname);
         assertThat(result.getResponse().getStatus()).isEqualTo(201);
+        client.withHeader("X-Expected-User-Id", String.valueOf(currentUserId(client)));
         return client;
     }
 

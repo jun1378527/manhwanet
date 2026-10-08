@@ -7,6 +7,7 @@ import { type FormEvent, useId, useRef, useState } from "react";
 import { RatingSummaryLine } from "@/components/ratings/RatingSummaryLine";
 import type { RatingSummary } from "@/lib/api/types";
 import { loginHref } from "@/lib/auth/return-to";
+import { USER_MISMATCH_CODE } from "@/lib/api/browser";
 import { deleteMyRating, fetchMyRating, fetchRatingSummary, saveMyRating } from "@/lib/ratings/client-api";
 import { createRatingMutationLock } from "@/lib/ratings/mutation-lock";
 import {
@@ -24,7 +25,7 @@ export type InitialMyRating =
   | { status: "anonymous" }
   | { status: "unavailable" };
 
-type Mine = InitialMyRating | { status: "expired" };
+type Mine = InitialMyRating | { status: "expired" } | { status: "switched" };
 
 type Notice = { tone: "success" | "error"; text: string; offerReload?: boolean };
 
@@ -34,6 +35,8 @@ type Props = {
   initialMine: InitialMyRating;
   /** 로그인 후 돌아올 현재 상세 주소 (returnTo 검증은 loginHref 가 한다) */
   selfHref: string;
+  /** 이 화면을 렌더링한 사용자 ID. 변경 요청의 X-Expected-User-Id 로 고정해 보낸다 */
+  viewerId: string | null;
 };
 
 /**
@@ -41,15 +44,19 @@ type Props = {
  * - 선택은 라디오 그룹, 저장은 명시적 "저장" 버튼. 방향키로 선택을 바꿔도 요청을 보내지 않는다.
  * - 저장·삭제가 성공하면 내 별점과 공개 집계를 다시 조회한다. 재조회가 실패해도 변경은 성공으로 안내한다.
  * - 변경 요청은 자동으로 다시 보내지 않는다. 연결 실패로 결과를 모르면 현재 값만 다시 조회한다.
+ * - 변경 요청은 렌더링 당시 사용자 ID를 헤더로 보낸다. 서버가 USER_MISMATCH 로 거절하면
+ *   이전 사용자의 별점 상태를 지우고 새 사용자 기준으로 다시 그린다.
  * - 저장과 삭제는 다시 그리기 전에 잠겨, 재조회가 끝날 때까지 다른 변경을 받지 않는다.
  * - 변경이 성공하면 현재 주소를 유지한 채 라우터 캐시를 갱신한다. 뒤로가기 목록은 staleTimes 와 무관하게
  *   이전 집계를 재사용하므로, 성공 시점의 refresh 로 그 캐시를 비운다.
  */
-export function WorkRatingSection({ workId, initialSummary, initialMine, selfHref }: Props) {
+export function WorkRatingSection({ workId, initialSummary, initialMine, selfHref, viewerId }: Props) {
   const router = useRouter();
   const legendId = useId();
   const errorId = useId();
   const mutationLock = useRef(createRatingMutationLock());
+  /** 사용자 전환을 감지했으면 true. 이후 도착하는 응답으로 이전 사용자의 별점을 다시 그리지 않는다 */
+  const switchedRef = useRef(false);
   const [summary, setSummary] = useState(initialSummary);
   const [mine, setMine] = useState<Mine>(initialMine);
   const [draft, setDraft] = useState<number | null>(
@@ -66,9 +73,32 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
     setDraft(rating.score);
   }
 
+  /** 이전 사용자의 별점 상태를 지우고 새 사용자 기준으로 다시 렌더링한다 */
+  function switchedViewer() {
+    switchedRef.current = true;
+    setMine({ status: "switched" });
+    setDraft(null);
+    setNotice(null);
+    setFieldError(null);
+    router.refresh();
+  }
+
   /** 내 별점과 공개 집계를 다시 조회한다. 둘 중 하나라도 실패하면 false */
-  async function reloadBoth(): Promise<boolean> {
-    const [myResult, summaryResult] = await Promise.all([fetchMyRating(workId), fetchRatingSummary(workId)]);
+  async function reloadBoth(viewer: string): Promise<boolean> {
+    if (switchedRef.current) {
+      return false;
+    }
+    const [myResult, summaryResult] = await Promise.all([
+      fetchMyRating(workId, viewer),
+      fetchRatingSummary(workId),
+    ]);
+    if (switchedRef.current) {
+      return false;
+    }
+    if (myResult.kind === "error" && myResult.code === USER_MISMATCH_CODE) {
+      switchedViewer();
+      return false;
+    }
     let complete = true;
     if (myResult.kind === "ok") {
       applyMine(myResult.data);
@@ -85,8 +115,11 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
     return complete;
   }
 
-  async function afterSuccess(successText: string) {
-    const complete = await reloadBoth();
+  async function afterSuccess(viewer: string, successText: string) {
+    const complete = await reloadBoth(viewer);
+    if (switchedRef.current) {
+      return;
+    }
     setNotice(
       complete
         ? { tone: "success", text: successText }
@@ -94,8 +127,12 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
     );
   }
 
-  async function afterFailure(result: Parameters<typeof ratingFailure>[0]) {
+  async function afterFailure(viewer: string, result: Parameters<typeof ratingFailure>[0]) {
     const failure = ratingFailure(result);
+    if (failure.kind === "account-switched") {
+      switchedViewer();
+      return;
+    }
     if (failure.kind === "session-expired") {
       setMine({ status: "expired" });
       return;
@@ -109,13 +146,17 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
       return;
     }
     // 반영 여부를 모른다: 변경 요청은 다시 보내지 않고 현재 값만 조회한다
-    const reconciled = await reloadBoth();
+    const reconciled = await reloadBoth(viewer);
+    if (switchedRef.current) {
+      return;
+    }
     setNotice({ tone: "error", text: reconciled ? UNKNOWN_OUTCOME_MESSAGE : UNREACHABLE_MESSAGE, offerReload: !reconciled });
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (draft === null || draft === saved) {
+    const viewer = viewerId;
+    if (viewer === null || switchedRef.current || draft === null || draft === saved) {
       return;
     }
     const score = draft;
@@ -125,18 +166,23 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
       setNotice(null);
       setFieldError(null);
       try {
-        const result = await saveMyRating(workId, score);
+        const result = await saveMyRating(workId, viewer, score);
+        if (switchedRef.current) {
+          return;
+        }
         if (result.kind === "ok") {
           applyMine(result.data);
           try {
-            await afterSuccess(successText);
+            await afterSuccess(viewer, successText);
           } finally {
-            // 재조회가 실패해도 변경 성공 안내는 이미 반영된 뒤다.
-            // refresh 는 캐시 설정을 바꾸지 않고, 이미 쌓인 뒤로가기 항목을 한 번 무효화한다.
-            router.refresh();
+            if (!switchedRef.current) {
+              // 재조회가 실패해도 변경 성공 안내는 이미 반영된 뒤다.
+              // refresh 는 캐시 설정을 바꾸지 않고, 이미 쌓인 뒤로가기 항목을 한 번 무효화한다.
+              router.refresh();
+            }
           }
         } else {
-          await afterFailure(result);
+          await afterFailure(viewer, result);
         }
       } finally {
         setPending(null);
@@ -145,7 +191,8 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
   }
 
   async function handleDelete() {
-    if (saved === null) {
+    const viewer = viewerId;
+    if (viewer === null || switchedRef.current || saved === null) {
       return;
     }
     await mutationLock.current.run(async () => {
@@ -153,17 +200,22 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
       setNotice(null);
       setFieldError(null);
       try {
-        const result = await deleteMyRating(workId);
+        const result = await deleteMyRating(workId, viewer);
+        if (switchedRef.current) {
+          return;
+        }
         if (result.kind === "ok") {
           setMine({ status: "loaded", rating: { workId, score: null, createdAt: null, updatedAt: null } });
           setDraft(null);
           try {
-            await afterSuccess("내 별점을 삭제했습니다.");
+            await afterSuccess(viewer, "내 별점을 삭제했습니다.");
           } finally {
-            router.refresh();
+            if (!switchedRef.current) {
+              router.refresh();
+            }
           }
         } else {
-          await afterFailure(result);
+          await afterFailure(viewer, result);
         }
       } finally {
         setPending(null);
@@ -172,10 +224,18 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
   }
 
   async function handleReload() {
+    const viewer = viewerId;
+    if (viewer === null) {
+      router.refresh();
+      return;
+    }
     await mutationLock.current.run(async () => {
       setPending("reload");
       try {
-        const complete = await reloadBoth();
+        const complete = await reloadBoth(viewer);
+        if (switchedRef.current) {
+          return;
+        }
         setNotice(complete ? null : { tone: "error", text: REFRESH_FAILED_MESSAGE, offerReload: true });
       } finally {
         setPending(null);
@@ -194,6 +254,10 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
         <p className="work-rating__login">
           {mine.status === "expired" ? SESSION_EXPIRED_MESSAGE : "별점을 남기려면 로그인하세요."}{" "}
           <Link href={loginHref(selfHref, mine.status === "expired" ? { expired: true } : undefined)}>로그인</Link>
+        </p>
+      ) : mine.status === "switched" ? (
+        <p className="work-rating__status" role="status">
+          로그인한 사용자가 바뀌어 화면을 다시 불러오는 중입니다…
         </p>
       ) : mine.status === "unavailable" ? (
         <p className="work-rating__status" role="alert">

@@ -32,7 +32,10 @@ public enum ErrorCode {
     // review
     REVIEW_NOT_FOUND(HttpStatus.NOT_FOUND, "리뷰를 찾을 수 없습니다."),
     REVIEW_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 이 작품에 리뷰를 작성했습니다."),
-    REVIEW_VERSION_CONFLICT(HttpStatus.CONFLICT, "리뷰가 다른 곳에서 수정되었거나 삭제 후 다시 작성되었습니다. 최신 내용을 확인해 주세요.");
+    REVIEW_VERSION_CONFLICT(HttpStatus.CONFLICT, "리뷰가 다른 곳에서 수정되었거나 삭제 후 다시 작성되었습니다. 최신 내용을 확인해 주세요."),
+
+    /** 화면이 예상한 사용자(X-Expected-User-Id)와 이 요청의 로그인 사용자가 다름. 아무것도 바꾸지 않는다 */
+    USER_MISMATCH(HttpStatus.CONFLICT, "로그인한 사용자가 바뀌었습니다. 화면을 새로 불러온 뒤 다시 시도해 주세요.");
 
     private final HttpStatus status;
     private final String message;

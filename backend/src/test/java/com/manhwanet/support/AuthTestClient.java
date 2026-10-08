@@ -29,6 +29,8 @@ public final class AuthTestClient {
 
     private Cookie csrfCookie;
     private MockHttpSession session;
+    /** 모든 요청에 붙일 추가 헤더 (예: 리뷰 API 의 X-Expected-User-Id) */
+    private final java.util.Map<String, String> extraHeaders = new java.util.LinkedHashMap<>();
 
     public AuthTestClient(MockMvc mockMvc, ObjectMapper objectMapper) {
         this.mockMvc = mockMvc;
@@ -145,7 +147,18 @@ public final class AuthTestClient {
         return csrfCookie;
     }
 
+    /** 이후 모든 요청에 헤더를 붙인다. value 가 null 이면 그 헤더를 뺀다. */
+    public AuthTestClient withHeader(String name, String value) {
+        if (value == null) {
+            extraHeaders.remove(name);
+        } else {
+            extraHeaders.put(name, value);
+        }
+        return this;
+    }
+
     private MockHttpServletRequestBuilder withSession(MockHttpServletRequestBuilder builder) {
+        extraHeaders.forEach(builder::header);
         return session == null ? builder : builder.session(session);
     }
 

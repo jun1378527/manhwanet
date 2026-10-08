@@ -6,23 +6,29 @@ type Props = {
   /** 1부터 시작 */
   currentPage: number;
   totalPages: number;
+  /** 페이지 번호(1부터) → 주소. 기본값은 작품 목록 */
+  hrefFor?: (page: number) => string;
+  /** nav 의 접근성 이름. 기본값 "작품 목록 페이지" */
+  label?: string;
+  /** 이동 시 스크롤 위치 유지 여부 (Link scroll). 기본값 true(Next 기본 동작) */
+  scroll?: boolean;
 };
 
 const WINDOW = 2;
 
 /** 목록 페이지 이동. 현재 페이지 앞뒤 2쪽과 처음·마지막 쪽을 보여 준다. */
-export function Pagination({ currentPage, totalPages }: Props) {
+export function Pagination({ currentPage, totalPages, hrefFor = worksListHref, label = "작품 목록 페이지", scroll }: Props) {
   if (totalPages <= 1) {
     return null;
   }
   const pages = visiblePages(currentPage, totalPages);
 
   return (
-    <nav className="pagination" aria-label="작품 목록 페이지">
+    <nav className="pagination" aria-label={label}>
       <ul>
         <li>
           {currentPage > 1 ? (
-            <Link href={worksListHref(currentPage - 1)} rel="prev">
+            <Link href={hrefFor(currentPage - 1)} rel="prev" scroll={scroll}>
               이전
             </Link>
           ) : (
@@ -44,7 +50,7 @@ export function Pagination({ currentPage, totalPages }: Props) {
                   {page}
                 </span>
               ) : (
-                <Link href={worksListHref(page)} aria-label={`${page}페이지`}>
+                <Link href={hrefFor(page)} aria-label={`${page}페이지`} scroll={scroll}>
                   {page}
                 </Link>
               )}
@@ -53,7 +59,7 @@ export function Pagination({ currentPage, totalPages }: Props) {
         )}
         <li>
           {currentPage < totalPages ? (
-            <Link href={worksListHref(currentPage + 1)} rel="next">
+            <Link href={hrefFor(currentPage + 1)} rel="next" scroll={scroll}>
               다음
             </Link>
           ) : (

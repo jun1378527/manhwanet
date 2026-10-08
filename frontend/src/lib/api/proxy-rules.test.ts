@@ -57,6 +57,7 @@ describe("request headers", () => {
       accept: "application/json",
       "content-type": "application/json",
       "x-xsrf-token": "token-value",
+      "x-expected-user-id": "9007199254740993",
       cookie: "theme=dark; MANHWANET_SESSION=ABC123; XSRF-TOKEN=token-value; _ga=GA1.1; __Host-MANHWANET_SESSION=DEF",
       host: "localhost:3000",
       origin: "http://localhost:3000",
@@ -66,6 +67,8 @@ describe("request headers", () => {
     const headers = upstreamRequestHeaders(incoming);
     assert.equal(headers.get("cookie"), "MANHWANET_SESSION=ABC123; XSRF-TOKEN=token-value; __Host-MANHWANET_SESSION=DEF");
     assert.equal(headers.get("x-xsrf-token"), "token-value");
+    // 리뷰 변경의 예상 사용자 헤더는 값 그대로(큰 ID 문자열) 넘긴다(#22)
+    assert.equal(headers.get("x-expected-user-id"), "9007199254740993");
     assert.equal(headers.get("content-type"), "application/json");
     assert.equal(headers.get("host"), null);
     assert.equal(headers.get("origin"), null);

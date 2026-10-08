@@ -31,6 +31,20 @@ export type ApiCallResult<T> =
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/** 화면이 예상한 사용자 ID 를 보내는 헤더. 서버가 같은 요청의 세션 사용자와 비교한다(#22) */
+export const EXPECTED_USER_HEADER = "X-Expected-User-Id";
+/** 예상 사용자와 세션 사용자가 다를 때 서버가 돌려주는 코드. CSRF 갱신·재시도 대상이 아니다 */
+export const USER_MISMATCH_CODE = "USER_MISMATCH";
+
+export type RequestOptions = {
+  /**
+   * 화면을 렌더링한 사용자 ID(십진수 문자열). 주면 모든 시도(CSRF 재시도 포함)에 같은 값을 헤더로 보낸다.
+   * 그 사이 브라우저 세션이 다른 계정으로 바뀌었다면 서버가 409 USER_MISMATCH 로 거절하므로,
+   * CSRF 재시도가 새 계정으로 요청을 재생해도 반영되지 않는다.
+   */
+  expectedUserId?: string;
+};
+
 /** 응답 data 를 검사해 원하는 타입으로 바꾼다. 모양이 다르면 null (unavailable 로 처리) */
 export type DataReader<T> = (data: unknown) => T | null;
 
@@ -39,6 +53,18 @@ type ParsedBody = {
   data?: unknown;
   error?: { code?: unknown; message?: unknown; fieldErrors?: unknown };
 };
+
+/**
+ * 이미 직렬화한 JSON 본문. JSON.stringify 를 다시 거치지 않고 그대로 보낸다.
+ * 큰 정수(Long)를 JavaScript number 로 바꾸지 않고 JSON 숫자로 보내야 할 때 쓴다(예: 리뷰 reviewId·version).
+ */
+export class SerializedJson {
+  readonly text: string;
+
+  constructor(text: string) {
+    this.text = text;
+  }
+}
 
 /** 본문이 없는 성공 응답(204 등)용 */
 export const readNothing: DataReader<true> = () => true;
@@ -53,8 +79,17 @@ function isMutation(method: HttpMethod): boolean {
   return method !== "GET";
 }
 
-async function send(method: HttpMethod, path: string, body: unknown, withCsrf: boolean): Promise<Response> {
+async function send(
+  method: HttpMethod,
+  path: string,
+  body: unknown,
+  withCsrf: boolean,
+  options: RequestOptions = {},
+): Promise<Response> {
   const headers: Record<string, string> = { Accept: "application/json" };
+  if (options.expectedUserId !== undefined) {
+    headers[EXPECTED_USER_HEADER] = options.expectedUserId;
+  }
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -67,7 +102,7 @@ async function send(method: HttpMethod, path: string, body: unknown, withCsrf: b
   return fetch(`${API_PREFIX}${path}`, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : body instanceof SerializedJson ? body.text : JSON.stringify(body),
     credentials: "same-origin",
     cache: "no-store",
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -145,28 +180,33 @@ export async function toResult<T>(response: Response, readData: DataReader<T>): 
  * 같은 출처 API 요청. GET 은 CSRF 없이, 그 밖의 메서드는 CSRF 토큰을 붙여 보낸다.
  * 변경 요청이 INVALID_CSRF_TOKEN 으로 거절되면 토큰을 다시 받아 한 번만 재시도한다.
  * (CSRF 거절은 서버가 요청을 처리하지 않았다는 뜻이므로 재시도해도 중복 반영되지 않는다)
+ * CSRF 거절은 로그인으로 세션·토큰이 바뀐 직후에도 생기므로, 재시도가 다른 계정에 반영되면 안 되는 요청은
+ * options.expectedUserId 를 줘야 한다. 서버의 사용자 일치 검사가 최종 방어다.
  */
 export async function apiRequest<T>(
   method: HttpMethod,
   path: string,
   readData: DataReader<T>,
   body?: unknown,
+  options: RequestOptions = {},
 ): Promise<ApiCallResult<T>> {
   try {
     if (!isMutation(method)) {
-      return await toResult(await send(method, path, undefined, false), readData);
+      return await toResult(await send(method, path, undefined, false, options), readData);
     }
     if (csrfToken() === null && !(await fetchCsrfToken())) {
       return { kind: "unavailable" };
     }
-    const first = await toResult(await send(method, path, body, true), readData);
+    const first = await toResult(await send(method, path, body, true, options), readData);
+    // 재시도는 CSRF 거절일 때만 한다. 사용자 불일치(USER_MISMATCH)는 계정이 바뀐 것이므로 갱신·재시도하지 않는다.
     if (first.kind !== "error" || first.code !== "INVALID_CSRF_TOKEN") {
       return first;
     }
     if (!(await fetchCsrfToken())) {
       return first;
     }
-    return await toResult(await send(method, path, body, true), readData);
+    // 재시도도 같은 예상 사용자 헤더를 보낸다. 그 사이 계정이 바뀌었다면 서버가 USER_MISMATCH 로 거절한다.
+    return await toResult(await send(method, path, body, true, options), readData);
   } catch {
     return { kind: "unavailable" };
   }

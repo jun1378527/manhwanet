@@ -5,6 +5,8 @@ import type { ApiCallResult } from "../api/browser";
 import { CSRF_FAILED_MESSAGE } from "../auth/messages";
 
 export type RatingFailure =
+  /** 화면의 사용자와 현재 세션 사용자가 다름. 아무것도 바뀌지 않았다. 이전 사용자의 별점 상태를 지운다 */
+  | { kind: "account-switched" }
   /** 세션 만료·비로그인: 로그인 안내로 바꾼다 */
   | { kind: "session-expired" }
   /** 연결 실패·시간 초과: 변경이 반영됐는지 알 수 없다. 자동으로 다시 보내지 않고 현재 값을 다시 조회한다 */
@@ -25,6 +27,8 @@ export function ratingFailure(result: Exclude<ApiCallResult<unknown>, { kind: "o
     return { kind: "unknown-outcome" };
   }
   switch (result.code) {
+    case "USER_MISMATCH":
+      return { kind: "account-switched" };
     case "UNAUTHORIZED":
       return { kind: "session-expired" };
     case "INVALID_CSRF_TOKEN":

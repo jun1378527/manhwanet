@@ -614,3 +614,184 @@ h2 {
   background: var(--color-danger-surface);
   color: var(--color-danger);
 }
+
+/* ---------- 리뷰 ---------- */
+
+.work-reviews {
+  margin: 32px 0;
+}
+
+.work-reviews h3 {
+  margin: 20px 0 8px;
+  font-size: 1.05rem;
+}
+
+.my-review__login,
+.my-review__status,
+.my-review__expired {
+  margin: 8px 0;
+}
+
+.my-review__expired {
+  padding: 10px 14px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius);
+  background: var(--color-danger-surface);
+  color: var(--color-danger);
+}
+
+.my-review__form,
+.my-review__view,
+.my-review__conflict,
+.my-review__confirm {
+  display: grid;
+  gap: 12px;
+}
+
+.my-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.my-review__conflict {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius);
+  background: var(--color-danger-surface);
+}
+
+.my-review__conflict > p {
+  margin: 0;
+}
+
+.my-review__latest {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+}
+
+.my-review__latest-label {
+  font-weight: 600;
+}
+
+.review-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 140px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.review-textarea[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.field--checkbox label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.field--checkbox input {
+  width: 20px;
+  height: 20px;
+}
+
+.button--danger {
+  background: var(--color-danger);
+  color: var(--color-bg);
+}
+
+.badge--warning {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.review-notice {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.review-notice--error {
+  border-color: var(--color-danger);
+  background: var(--color-danger-surface);
+  color: var(--color-danger);
+}
+
+/* 입력한 글자 그대로 보여 준다: 줄바꿈 유지, 긴 문자열 줄바꿈, 양방향 문자가 주변 UI로 번지지 않게 격리 */
+.review-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+  line-height: 1.6;
+}
+
+.review-meta {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+.review-list-area__count {
+  color: var(--color-muted);
+  font-weight: normal;
+}
+
+.review-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.review-item__author {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.review-item__nickname {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+.review-item__spoiler {
+  margin: 0;
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.review-item .link-button {
+  justify-self: start;
+  min-height: 44px;
+}
+
+.review-list__empty {
+  color: var(--color-muted);
+}
