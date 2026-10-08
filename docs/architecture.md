@@ -58,6 +58,7 @@
 ### 페이지네이션 — `PageResponse<T>`
 
 - 목록 API는 `page`(0부터), `size`(1~100, 기본 20), `sort`를 직접 받아 요청 경계에서 검증하고 `PageableFactory`로 `Pageable`을 만듭니다. Spring의 `Pageable` 자동 바인딩(값을 조용히 보정)은 사용하지 않습니다.
+- offset(`page × size`)은 `Integer.MAX_VALUE`(2,147,483,647) 이하만 지원합니다. JPA `Query#setFirstResult(int)`가 int를 받아 Spring Data JPA가 그보다 큰 offset을 예외로 거절하기 때문입니다. `PageableFactory`가 Repository 호출 전에 long 곱셈으로 검사해 400 `INVALID_INPUT`(`fieldErrors[page]`, 그 size에서 허용하는 최대 page 안내)으로 응답합니다. 값을 줄이거나 바꾸지 않습니다. 작품·작가·리뷰 목록이 같은 규칙을 씁니다(#20).
 - 정렬 키는 허용 목록(`createdAt`, `id`)으로 제한하고, `createdAt` 정렬에는 같은 방향의 `id`를 보조 기준으로 붙입니다.
 - 컬렉션 fetch join과 페이징을 결합하지 않습니다. 페이지 조회 후 연관 데이터를 페이지 단위 `IN` 쿼리로 일괄 조회합니다.
 

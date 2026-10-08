@@ -84,4 +84,63 @@ class PageableFactoryTest {
         assertThatThrownBy(() -> PageableFactory.createWithFixedSort(Integer.MAX_VALUE / 50 + 1, 50, 50, order))
                 .isInstanceOf(InvalidInputException.class);
     }
+
+    // ---------- #20: offset(page × size) 지원 범위 ----------
+
+    @Test
+    void offsetUpToIntMaxIsAcceptedForEverySize() {
+        for (int size : new int[] {1, 7, 10, 20, 50, 100}) {
+            int maxPage = PageableFactory.maxPage(size);
+            assertThat((long) maxPage * size).isLessThanOrEqualTo(Integer.MAX_VALUE);
+            assertThat(((long) maxPage + 1) * size).isGreaterThan(Integer.MAX_VALUE);
+            Pageable pageable = PageableFactory.create(maxPage, size, null);
+            assertThat(pageable.getPageNumber()).isEqualTo(maxPage);
+            assertThat(pageable.getPageSize()).isEqualTo(size);
+            assertThat(pageable.getOffset()).isLessThanOrEqualTo(Integer.MAX_VALUE);
+        }
+        // size 1 이면 int 최대 page 까지 지원한다 (offset = Integer.MAX_VALUE)
+        assertThat(PageableFactory.create(Integer.MAX_VALUE, 1, null).getOffset()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(PageableFactory.maxPage(100)).isEqualTo(21_474_836);
+        assertThat(PageableFactory.maxPage(20)).isEqualTo(107_374_182);
+        assertThat(PageableFactory.maxPage(50)).isEqualTo(42_949_672);
+    }
+
+    @Test
+    void offsetPastIntMaxIsRejectedOnPageWithoutOverflowOrClamping() {
+        for (int size : new int[] {2, 20, 100}) {
+            int tooLarge = PageableFactory.maxPage(size) + 1;
+            assertThatThrownBy(() -> PageableFactory.create(tooLarge, size, null))
+                    .isInstanceOfSatisfying(InvalidInputException.class, e -> {
+                        assertThat(e.getFieldErrors()).hasSize(1);
+                        assertThat(e.getFieldErrors().get(0).field()).isEqualTo("page");
+                        assertThat(e.getFieldErrors().get(0).reason())
+                                .contains("0 이상 " + PageableFactory.maxPage(size) + " 이하");
+                    });
+        }
+        // int 곱셈이면 음수로 넘쳐 통과했을 값: 2147483647 × 100 = 214748364700 (int 로는 -100)
+        assertThat(Integer.MAX_VALUE * 100).isNegative();
+        assertThatThrownBy(() -> PageableFactory.create(Integer.MAX_VALUE, 100, null))
+                .isInstanceOf(InvalidInputException.class);
+        assertThatThrownBy(() -> PageableFactory.create(Integer.MAX_VALUE, 2, null))
+                .isInstanceOf(InvalidInputException.class);
+        // 고정 정렬 목록도 같은 규칙
+        Sort order = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+        assertThat(PageableFactory.createWithFixedSort(PageableFactory.maxPage(50), 50, 50, order).getOffset())
+                .isLessThanOrEqualTo(Integer.MAX_VALUE);
+        assertThatThrownBy(() -> PageableFactory.createWithFixedSort(PageableFactory.maxPage(50) + 1, 50, 50, order))
+                .isInstanceOf(InvalidInputException.class);
+    }
+
+    @Test
+    void pageAndSizeChecksStillComeFirst() {
+        assertThatThrownBy(() -> PageableFactory.create(-1, 20, null))
+                .isInstanceOfSatisfying(InvalidInputException.class,
+                        e -> assertThat(e.getFieldErrors().get(0).field()).isEqualTo("page"));
+        assertThatThrownBy(() -> PageableFactory.create(Integer.MAX_VALUE, 101, null))
+                .isInstanceOfSatisfying(InvalidInputException.class,
+                        e -> assertThat(e.getFieldErrors().get(0).field()).isEqualTo("size"));
+        assertThatThrownBy(() -> PageableFactory.create(0, 0, null))
+                .isInstanceOfSatisfying(InvalidInputException.class,
+                        e -> assertThat(e.getFieldErrors().get(0).field()).isEqualTo("size"));
+    }
 }

@@ -184,7 +184,7 @@ review ──✗ rating (서로 모름)
 ### 4.1 공개 목록 정렬·페이지
 
 - **[확정]** 정렬은 `created_at DESC, id DESC` **고정**입니다. `sort` 파라미터는 받지 않습니다(보내도 무시).
-- 페이지: `page` 0부터(기본 0), `size` 1~50(**기본 10**). 범위 밖이면 400 `INVALID_INPUT`(`fieldErrors[page]`·`[size]`). offset(`page × size`)이 int 범위를 넘는 `page`도 400("page가 너무 큽니다.")입니다. 마지막 페이지를 넘는 `page`는 빈 `content`(200).
+- 페이지: `page` 0부터(기본 0), `size` 1~50(**기본 10**). 범위 밖이면 400 `INVALID_INPUT`(`fieldErrors[page]`·`[size]`). offset(`page × size`)이 `Integer.MAX_VALUE`를 넘는 `page`도 400(`fieldErrors[page]`, 그 size의 최대 page 안내)입니다. 작품·작가 목록과 같은 규칙입니다(#20). 마지막 페이지를 넘는 `page`는 빈 `content`(200).
 - 응답은 **[기존]** `PageResponse`(`totalElements` = 그 작품의 리뷰 수)입니다.
 - **보장 범위**: 같은 데이터에서 순서는 결정적입니다(`id` 보조 기준). offset 방식이므로 페이지를 넘기는 사이에 리뷰가 추가·삭제되면 항목이 밀려 중복되거나 빠져 보일 수 있습니다.
 

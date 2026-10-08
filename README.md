@@ -220,7 +220,8 @@ cd backend
 | `HealthControllerTest` | health 정상/503 응답 | X |
 | `HealthServiceTest` | DB 연결 성공/실패 판정 | X |
 | `ManhwanetApplicationTests` | 컨텍스트 로딩, Flyway V1·V3 적용, 실제 DB 대상 health, 공개 경로 404·비공개 경로 401 | O |
-| `PageableFactoryTest`, `LanguageTagsTest`, `CountryCodesTest`, `WorkTest`, `WorkServiceTest` | 정렬 파싱, 언어·국가 코드 정규화, 도메인 불변식, 중복 제약 → 409 변환 | X |
+| `PageableFactoryTest`, `LanguageTagsTest`, `CountryCodesTest`, `WorkTest`, `WorkServiceTest` | 정렬 파싱, page·size·offset 경계(int 오버플로 없음), 언어·국가 코드 정규화, 도메인 불변식, 중복 제약 → 409 변환 | X |
+| `PaginationLimitIntegrationTest` | 작품·작가·리뷰 목록의 최대 지원 page(200)와 바로 다음 값·음수·int 초과·형식 오류(400 `fieldErrors`), 거절 시 SQL 미실행 (#20) | O |
 | `WorkControllerTest`, `CreatorControllerTest` | 페이지·정렬 파라미터 검증, 404 | X |
 | `WorkCreatorMigrationTest` | V2 적용, 제약·인덱스 이름, DB 제약 동작 | O |
 | `PasswordPolicyTest`, `AccountFieldsTest`, `LoginAttemptLimiterTest`, `CreateAdminCommandTest` | 비밀번호 정책·정규화, 이메일·닉네임, 로그인 실패 제한(동시성·만료), 관리자 명령 입력 | X |
@@ -310,7 +311,7 @@ npm run build
 | POST | `/api/v1/admin/works` | 작품 등록 (ADMIN) |
 | POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN) |
 
-- 페이지: `page` 0부터(기본 0), `size` 1~100(기본 20), `sort`는 `createdAt` 또는 `id`에 `,asc`/`,desc` (기본 `createdAt,desc` + `id,desc`). 범위 밖 값이나 허용하지 않은 정렬은 400입니다.
+- 페이지: `page` 0부터(기본 0), `size` 1~100(기본 20), `sort`는 `createdAt` 또는 `id`에 `,asc`/`,desc` (기본 `createdAt,desc` + `id,desc`). 범위 밖 값이나 허용하지 않은 정렬은 400입니다. `page × size`(offset)는 2,147,483,647 이하만 지원하며, 넘으면 `page` 필드 오류(400)입니다(예: `size=100`이면 `page` 최대 21474836).
 - 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md), 별점은 [docs/rating-design-draft.md](docs/rating-design-draft.md), 리뷰는 [docs/review-design-draft.md](docs/review-design-draft.md)를 참고하세요.
 - 작품 목록·상세 응답에는 `rating: { average, count }`가 있습니다. `average`는 소수 첫째 자리(HALF_UP)이고 별점이 없으면 `null`입니다.
 - POST 등 변경 요청은 `XSRF-TOKEN` 쿠키 값을 `X-XSRF-TOKEN` 헤더로 보내야 합니다. 공개 GET(작품·작가·health) 외의 경로는 로그인이 필요합니다.
