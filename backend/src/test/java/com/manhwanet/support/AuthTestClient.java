@@ -67,6 +67,20 @@ public final class AuthTestClient {
         return result;
     }
 
+    /** 세션·CSRF 쿠키·헤더를 붙인 POST. 본문 JSON 원문을 그대로 보낸다(형식 검증용). */
+    public MvcResult postRaw(String path, String rawJson) throws Exception {
+        if (csrfCookie == null) {
+            fetchCsrf();
+        }
+        MvcResult result = mockMvc.perform(withSession(post(path))
+                .cookie(csrfCookie)
+                .header(CSRF_HEADER, csrfCookie.getValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(rawJson)).andReturn();
+        afterResponse(result);
+        return result;
+    }
+
     /** 세션·CSRF 쿠키·헤더를 붙인 PUT. 본문 JSON 원문을 그대로 보낸다(문자열·null 점수 검증용). */
     public MvcResult putRaw(String path, String rawJson) throws Exception {
         if (csrfCookie == null) {

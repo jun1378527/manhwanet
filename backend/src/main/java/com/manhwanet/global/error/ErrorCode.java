@@ -27,7 +27,12 @@ public enum ErrorCode {
     WORK_NOT_FOUND(HttpStatus.NOT_FOUND, "작품을 찾을 수 없습니다."),
 
     // creator
-    CREATOR_NOT_FOUND(HttpStatus.NOT_FOUND, "작가를 찾을 수 없습니다.");
+    CREATOR_NOT_FOUND(HttpStatus.NOT_FOUND, "작가를 찾을 수 없습니다."),
+
+    // review
+    REVIEW_NOT_FOUND(HttpStatus.NOT_FOUND, "리뷰를 찾을 수 없습니다."),
+    REVIEW_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 이 작품에 리뷰를 작성했습니다."),
+    REVIEW_VERSION_CONFLICT(HttpStatus.CONFLICT, "리뷰가 다른 곳에서 수정되었거나 삭제 후 다시 작성되었습니다. 최신 내용을 확인해 주세요.");
 
     private final HttpStatus status;
     private final String message;

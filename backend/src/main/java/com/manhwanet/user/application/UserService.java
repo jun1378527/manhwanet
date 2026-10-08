@@ -15,7 +15,12 @@ import com.manhwanet.user.domain.UserRole;
 import com.manhwanet.user.dto.SignupRequest;
 import com.manhwanet.user.dto.UserResponse;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -56,6 +61,27 @@ public class UserService {
         return userRepository.findById(userId)
                 .map(UserResponse::from)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+    }
+
+    /**
+     * 사용자 ID 목록의 현재 닉네임을 SQL 1개로 일괄 조회한다. 다른 도메인(review)이 작성자 표시에 쓴다.
+     * 빈 입력은 SQL 없이 빈 결과를 돌려준다. 없는 ID는 결과에 넣지 않는다. 이메일·역할 등 다른 정보는 주지 않는다.
+     */
+    public Map<Long, String> findNicknames(Collection<Long> userIds) {
+        Set<Long> ids = new LinkedHashSet<>();
+        for (Long userId : userIds) {
+            if (userId != null) {
+                ids.add(userId);
+            }
+        }
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> nicknames = new HashMap<>();
+        for (UserRepository.UserNickname row : userRepository.findNicknamesByIdIn(ids)) {
+            nicknames.put(row.getId(), Objects.requireNonNull(row.getNickname()));
+        }
+        return Map.copyOf(nicknames);
     }
 
     /** @param normalizedEmail {@link EmailAddresses#normalize} 결과 */

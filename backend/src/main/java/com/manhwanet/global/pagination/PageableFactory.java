@@ -39,6 +39,23 @@ public final class PageableFactory {
         return PageRequest.of(page, size, parseSort(sort));
     }
 
+    /**
+     * 정렬을 요청으로 받지 않는 목록용(예: 리뷰 목록). page·size 범위를 검증하고 주어진 고정 정렬을 쓴다.
+     * offset(page × size)이 int 범위를 넘으면 JPA 가 처리할 수 없으므로 400 으로 거절한다.
+     */
+    public static Pageable createWithFixedSort(int page, int size, int maxSize, Sort sort) {
+        if (page < 0) {
+            throw InvalidInputException.of("page", "page는 0 이상이어야 합니다.");
+        }
+        if (size < 1 || size > maxSize) {
+            throw InvalidInputException.of("size", "size는 1 이상 " + maxSize + " 이하여야 합니다.");
+        }
+        if ((long) page * size > Integer.MAX_VALUE) {
+            throw InvalidInputException.of("page", "page가 너무 큽니다.");
+        }
+        return PageRequest.of(page, size, sort);
+    }
+
     static Sort parseSort(String sort) {
         if (sort == null || sort.isBlank()) {
             return byProperty(CREATED_AT, Sort.Direction.DESC);

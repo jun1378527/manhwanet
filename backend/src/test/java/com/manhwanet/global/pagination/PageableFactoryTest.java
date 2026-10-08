@@ -62,4 +62,26 @@ class PageableFactoryTest {
         assertThatThrownBy(() -> PageableFactory.create(0, 101, null)).isInstanceOf(InvalidInputException.class);
         assertThat(PageableFactory.create(0, 100, null).getPageSize()).isEqualTo(100);
     }
+
+    @Test
+    void fixedSortValidatesPageSizeAndOffset() {
+        Sort order = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+        Pageable pageable = PageableFactory.createWithFixedSort(2, 10, 50, order);
+        assertThat(pageable.getPageNumber()).isEqualTo(2);
+        assertThat(pageable.getPageSize()).isEqualTo(10);
+        assertThat(pageable.getSort()).isEqualTo(order);
+        assertThat(PageableFactory.createWithFixedSort(0, 50, 50, order).getPageSize()).isEqualTo(50);
+
+        assertThatThrownBy(() -> PageableFactory.createWithFixedSort(-1, 10, 50, order))
+                .isInstanceOf(InvalidInputException.class);
+        assertThatThrownBy(() -> PageableFactory.createWithFixedSort(0, 0, 50, order))
+                .isInstanceOf(InvalidInputException.class);
+        assertThatThrownBy(() -> PageableFactory.createWithFixedSort(0, 51, 50, order))
+                .isInstanceOf(InvalidInputException.class);
+        // offset 이 int 범위를 넘으면 JPA 가 처리할 수 없으므로 거절
+        assertThat(PageableFactory.createWithFixedSort(Integer.MAX_VALUE / 50, 50, 50, order).getOffset())
+                .isLessThanOrEqualTo(Integer.MAX_VALUE);
+        assertThatThrownBy(() -> PageableFactory.createWithFixedSort(Integer.MAX_VALUE / 50 + 1, 50, 50, order))
+                .isInstanceOf(InvalidInputException.class);
+    }
 }

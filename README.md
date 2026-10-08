@@ -6,7 +6,8 @@
 > 작품(Work·WorkTitle)과 작가(Creator·WorkCreator)의 등록·조회 API가 구현되어 있습니다. ([명세](docs/work-creator-spec.md))
 > Frontend에서 작품 목록(`/works`)과 상세(`/works/[id]`)를 보고, 가입(`/signup`)·로그인(`/login`)·로그아웃할 수 있습니다.
 > 작품 별점(내 별점 등록·수정·삭제, 작품 목록·상세의 평균·참여자 수)을 API와 화면에서 쓸 수 있습니다. ([명세](docs/rating-design-draft.md))
-> 리뷰, 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
+> 작품 리뷰(내 리뷰 작성·수정·삭제, 작품별 공개 목록)는 API만 구현되어 있고 화면은 아직 없습니다. ([명세](docs/review-design-draft.md))
+> 댓글, 랭킹, 검색과 작품·작가 수정/삭제는 아직 구현되어 있지 않습니다.
 > 공통 기반(빌드, DB 연결, 마이그레이션, 공통 응답/예외 처리, 테스트 환경) 위에 작품·작가 등록·조회 API가 구현되어 있습니다.
 
 ## 기술 스택
@@ -43,7 +44,7 @@ manhwanet/
 │       │   ├── application.yml      # 공통 설정
 │       │   ├── application-local.yml# 로컬 프로필 (기본)
 │       │   ├── application-test.yml # 테스트 프로필
-│       │   └── db/migration/        # Flyway 마이그레이션 (V1__init, V2__create_work_and_creator_tables)
+│       │   └── db/migration/        # Flyway 마이그레이션 (V1__init ~ V5__create_work_reviews)
 │       └── test/java/com/manhwanet/
 ├── frontend/                        # Next.js + TypeScript + App Router
 │   ├── src/app/                     # 화면 (/, /works, /works/[id], /login, /signup) — error / not-found 포함
@@ -232,6 +233,11 @@ cd backend
 | `WorkRatingMigrationTest` | V4 적용, 유니크·CHECK·FK(작품 CASCADE, 사용자 RESTRICT) | O |
 | `RatingApiIntegrationTest` | 내 별점 GET·PUT·DELETE, 시각 정책, 점수 검증(문자열·null 거절), 401·403·404, USER·ADMIN 격리, 공개 집계·반올림, 큰 ID | O |
 | `RatingConcurrencyTest`, `RatingRollbackTest` | 동시 PUT, PUT·DELETE 경쟁(트랜잭션 순서 재현 포함), 롤백, FK 위반 → 404 | O |
+| `ReviewBodyTest` | 리뷰 본문 정규화: 코드 포인트 경계(이모지·조합 문자), 앞뒤 공백, 줄바꿈 LF 통일, NUL·제어 문자 거절 | X |
+| `WorkReviewMigrationTest` | V5 적용, 유니크·본문 길이·공백·version·시각 CHECK, FK(작품 CASCADE, 사용자 RESTRICT), NUL 저장 불가 | O |
+| `ReviewApiIntegrationTest` | 공개 목록·내 리뷰 GET·POST·PUT·DELETE, 보안 규칙(익명 공개 GET·`/me` 401·CSRF 403), 입력 검증, `reviewId`+`version` 충돌, 삭제 후 재작성, USER·ADMIN 격리, 정렬·페이지, 공개 필드, 큰 ID·version | O |
+| `ReviewConcurrencyTest`, `ReviewRollbackTest` | 동시 작성, 같은 버전 동시 수정, 수정·삭제 경쟁, 잠금 대기 중 재작성(트랜잭션 순서 재현), 롤백, FK 위반 → 404 | O |
+| `ReviewQueryCountTest` | 리뷰·작성자 수가 늘어도 공개 목록 SQL 수가 같음, 닉네임 일괄 조회 1회, 빈 페이지는 닉네임 조회 생략 (N+1 회귀) | O |
 
 - 통합 테스트는 테스트 DB 이름이 `_test`로 끝나고 `DB_NAME`과 다른지 확인한 뒤, `TRUNCATE` 직전에 `current_database()`가 그 이름과 같은지 다시 확인합니다. 이름이 같거나, 비어 있거나, 접미사가 없으면 정리를 거절합니다. `_test` 접미사는 안전장치이며, 그 DB의 과거 용도를 증명하지는 않습니다.
 - 등록 API 통합 테스트는 ADMIN 사용자와 CSRF 토큰으로 요청합니다(spring-security-test).
@@ -291,11 +297,16 @@ npm run build
 | GET | `/api/v1/me/ratings/{workId}` | 내 별점 (로그인 필요). 평가하지 않았으면 `score: null` |
 | PUT | `/api/v1/me/ratings/{workId}` | 내 별점 등록·수정 `{"score": 4.5}` (0.5~5.0, 0.5 단위) |
 | DELETE | `/api/v1/me/ratings/{workId}` | 내 별점 삭제 (204, 반복 가능) |
+| GET | `/api/v1/works/{workId}/reviews` | 작품별 공개 리뷰 목록 (`page`, `size` 1~50 기본 10, 작성 시각 최신순) |
+| GET | `/api/v1/me/reviews/{workId}` | 내 리뷰 (로그인 필요). 작성하지 않았으면 `review: null` |
+| POST | `/api/v1/me/reviews/{workId}` | 내 리뷰 작성 `{"body", "containsSpoiler"}` (201, 이미 있으면 409) |
+| PUT | `/api/v1/me/reviews/{workId}` | 내 리뷰 수정 `{"reviewId", "version", "body", "containsSpoiler"}` (불일치 409) |
+| DELETE | `/api/v1/me/reviews/{workId}?reviewId=&version=` | 내 리뷰 삭제 (204, 리뷰가 없어도 204, 불일치 409) |
 | POST | `/api/v1/admin/works` | 작품 등록 (ADMIN) |
 | POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN) |
 
 - 페이지: `page` 0부터(기본 0), `size` 1~100(기본 20), `sort`는 `createdAt` 또는 `id`에 `,asc`/`,desc` (기본 `createdAt,desc` + `id,desc`). 범위 밖 값이나 허용하지 않은 정렬은 400입니다.
-- 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md), 별점은 [docs/rating-design-draft.md](docs/rating-design-draft.md)를 참고하세요.
+- 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md), 별점은 [docs/rating-design-draft.md](docs/rating-design-draft.md), 리뷰는 [docs/review-design-draft.md](docs/review-design-draft.md)를 참고하세요.
 - 작품 목록·상세 응답에는 `rating: { average, count }`가 있습니다. `average`는 소수 첫째 자리(HALF_UP)이고 별점이 없으면 `null`입니다.
 - POST 등 변경 요청은 `XSRF-TOKEN` 쿠키 값을 `X-XSRF-TOKEN` 헤더로 보내야 합니다. 공개 GET(작품·작가·health) 외의 경로는 로그인이 필요합니다.
 
