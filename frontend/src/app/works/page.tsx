@@ -6,8 +6,9 @@ import { CreditList } from "@/components/CreditList";
 import { Pagination } from "@/components/Pagination";
 import { RatingSummaryLine } from "@/components/ratings/RatingSummaryLine";
 import { ApiUnavailable, StatusMessage } from "@/components/StatusMessage";
+import { WorkTile } from "@/components/WorkTile";
 import { getWorks } from "@/lib/api/works";
-import { WORK_FORMAT_LABELS } from "@/lib/works/labels";
+import { WORK_FORMAT_LABELS, countryName } from "@/lib/works/labels";
 import { parseListPage, workDetailHref, worksListHref } from "@/lib/works/params";
 
 export const metadata: Metadata = {
@@ -25,7 +26,10 @@ export default async function WorksPage({ searchParams }: PageProps<"/works">) {
 
   return (
     <>
-      <h1>작품 목록</h1>
+      <header className="page-intro">
+        <h1>작품 목록</h1>
+        <p className="page-intro__lead">한국 웹툰과 일본 만화를 함께 둘러보고 평가하세요.</p>
+      </header>
       {!result.ok ? (
         <ApiUnavailable retryHref={worksListHref(page)} />
       ) : result.data.totalElements === 0 ? (
@@ -50,16 +54,20 @@ export default async function WorksPage({ searchParams }: PageProps<"/works">) {
           <ol className="work-list">
             {result.data.content.map((work) => (
               <li key={work.id} className="work-card">
-                <h2 className="work-card__title">
-                  <Link href={workDetailHref(work.id, page)} lang={work.primaryTitle.languageCode}>
-                    {work.primaryTitle.title}
-                  </Link>
-                </h2>
-                <p className="work-card__format">
-                  <span className="badge">{WORK_FORMAT_LABELS[work.workFormat] ?? work.workFormat}</span>
-                </p>
-                <CreditList credits={work.creators} className="work-card__credits" />
-                <RatingSummaryLine summary={work.rating} className="work-card__rating" />
+                <WorkTile title={work.primaryTitle} format={work.workFormat} />
+                <div className="work-card__body">
+                  <h2 className="work-card__title" lang={work.primaryTitle.languageCode}>
+                    <Link href={workDetailHref(work.id, page)} lang={work.primaryTitle.languageCode}>
+                      {work.primaryTitle.title}
+                    </Link>
+                  </h2>
+                  <p className="work-card__format">
+                    <span className="badge">{WORK_FORMAT_LABELS[work.workFormat] ?? work.workFormat}</span>
+                    {work.originCountry ? <span className="work-card__country">{countryName(work.originCountry)}</span> : null}
+                  </p>
+                  <CreditList credits={work.creators} className="work-card__credits" />
+                  <RatingSummaryLine summary={work.rating} className="work-card__rating" />
+                </div>
               </li>
             ))}
           </ol>

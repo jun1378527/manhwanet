@@ -6,11 +6,12 @@ import { CreditList } from "@/components/CreditList";
 import { WorkRatingSection } from "@/components/ratings/WorkRatingSection";
 import { WorkReviewSection } from "@/components/reviews/WorkReviewSection";
 import { ApiUnavailable } from "@/components/StatusMessage";
+import { WorkTile } from "@/components/WorkTile";
 import { getWork } from "@/lib/api/works";
 import { getSession } from "@/lib/auth/session";
 import { type MyRatingState, getMyRating } from "@/lib/ratings/server";
 import { type MyReviewState, getMyReview, getReviewPage } from "@/lib/reviews/server";
-import { WORK_FORMAT_LABELS, countryLabel, languageLabel } from "@/lib/works/labels";
+import { WORK_FORMAT_LABELS, countryLabel, countryName, languageLabel } from "@/lib/works/labels";
 import { isValidWorkId, parseListPage, parseReturnPage, workDetailHref, worksListHref } from "@/lib/works/params";
 
 export async function generateMetadata({ params }: PageProps<"/works/[id]">): Promise<Metadata> {
@@ -59,72 +60,85 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
     <article className="work-detail">
       <BackLink href={listHref} />
 
+      {/* 작품 정보를 먼저 두고(읽기·탭 순서), 별점·리뷰는 그 뒤에 둔다. 넓은 화면에서는 별점이 오른쪽 열로 간다. */}
       <header className="work-detail__header">
-        <h1 lang={work.primaryTitle.languageCode}>{work.primaryTitle.title}</h1>
-        <p>
-          <span className="badge">{WORK_FORMAT_LABELS[work.workFormat] ?? work.workFormat}</span>
-        </p>
+        <WorkTile title={work.primaryTitle} format={work.workFormat} size="lg" />
+        <div className="work-detail__heading">
+          <p className="work-detail__badges">
+            <span className="badge">{WORK_FORMAT_LABELS[work.workFormat] ?? work.workFormat}</span>
+            {work.originCountry ? <span className="badge">{countryName(work.originCountry)}</span> : null}
+          </p>
+          <h1 lang={work.primaryTitle.languageCode}>{work.primaryTitle.title}</h1>
+          <section aria-labelledby="credits-heading" className="work-detail__credits">
+            <h2 id="credits-heading" className="visually-hidden">
+              작가
+            </h2>
+            <CreditList credits={work.creators} />
+          </section>
+        </div>
       </header>
 
-      <dl className="work-detail__facts">
-        <div>
-          <dt>대표 제목 언어</dt>
-          <dd>{languageLabel(work.primaryTitle.languageCode)}</dd>
+      <div className="work-detail__layout">
+        <div className="work-detail__info">
+          <section aria-labelledby="description-heading">
+            <h2 id="description-heading">줄거리</h2>
+            {work.description ? (
+              <p className="work-detail__description">{work.description}</p>
+            ) : (
+              <p className="muted">등록된 줄거리가 없습니다.</p>
+            )}
+          </section>
+
+          <section aria-labelledby="titles-heading">
+            <h2 id="titles-heading">다른 제목</h2>
+            {alternativeTitles.length > 0 ? (
+              <ul className="title-list">
+                {alternativeTitles.map((title) => (
+                  <li key={`${title.languageCode}:${title.title}`}>
+                    <span lang={title.languageCode}>{title.title}</span>{" "}
+                    <span className="title-list__lang">{languageLabel(title.languageCode)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">등록된 다른 제목이 없습니다.</p>
+            )}
+            <dl className="work-detail__facts">
+              <div>
+                <dt>대표 제목 언어</dt>
+                <dd>{languageLabel(work.primaryTitle.languageCode)}</dd>
+              </div>
+              <div>
+                <dt>국가</dt>
+                <dd>{work.originCountry ? countryLabel(work.originCountry) : "정보 없음"}</dd>
+              </div>
+            </dl>
+          </section>
         </div>
-        <div>
-          <dt>국가</dt>
-          <dd>{work.originCountry ? countryLabel(work.originCountry) : "정보 없음"}</dd>
+
+        <div className="work-detail__side">
+          <WorkRatingSection
+            key={viewerKey}
+            workId={work.id}
+            initialSummary={work.rating}
+            initialMine={myRating}
+            selfHref={workDetailHref(work.id, fromPage, reviewPage)}
+            viewerId={viewer.viewerId}
+          />
         </div>
-      </dl>
 
-      <WorkRatingSection
-        key={viewerKey}
-        workId={work.id}
-        initialSummary={work.rating}
-        initialMine={myRating}
-        selfHref={workDetailHref(work.id, fromPage, reviewPage)}
-        viewerId={viewer.viewerId}
-      />
-
-      <WorkReviewSection
-        key={viewer.reviewViewerKey}
-        workId={work.id}
-        viewerId={viewer.viewerId}
-        initialMine={viewer.myReview}
-        initialList={reviewList}
-        reviewPage={reviewPage}
-        fromPage={fromPage}
-      />
-
-      <section aria-labelledby="credits-heading">
-        <h2 id="credits-heading">작가</h2>
-        <CreditList credits={work.creators} />
-      </section>
-
-      <section aria-labelledby="titles-heading">
-        <h2 id="titles-heading">다른 제목</h2>
-        {alternativeTitles.length > 0 ? (
-          <ul className="title-list">
-            {alternativeTitles.map((title) => (
-              <li key={`${title.languageCode}:${title.title}`}>
-                <span lang={title.languageCode}>{title.title}</span>{" "}
-                <span className="title-list__lang">{languageLabel(title.languageCode)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted">등록된 다른 제목이 없습니다.</p>
-        )}
-      </section>
-
-      <section aria-labelledby="description-heading">
-        <h2 id="description-heading">줄거리</h2>
-        {work.description ? (
-          <p className="work-detail__description">{work.description}</p>
-        ) : (
-          <p className="muted">등록된 줄거리가 없습니다.</p>
-        )}
-      </section>
+        <div className="work-detail__reviews">
+          <WorkReviewSection
+            key={viewer.reviewViewerKey}
+            workId={work.id}
+            viewerId={viewer.viewerId}
+            initialMine={viewer.myReview}
+            initialList={reviewList}
+            reviewPage={reviewPage}
+            fromPage={fromPage}
+          />
+        </div>
+      </div>
     </article>
   );
 }

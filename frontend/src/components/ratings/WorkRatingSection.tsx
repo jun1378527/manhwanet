@@ -27,7 +27,7 @@ export type InitialMyRating =
 
 type Mine = InitialMyRating | { status: "expired" } | { status: "switched" };
 
-type Notice = { tone: "success" | "error"; text: string; offerReload?: boolean };
+type Notice = { tone: "success" | "error" | "info"; text: string; offerReload?: boolean };
 
 type Props = {
   workId: string;
@@ -150,7 +150,7 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
     if (switchedRef.current) {
       return;
     }
-    setNotice({ tone: "error", text: reconciled ? UNKNOWN_OUTCOME_MESSAGE : UNREACHABLE_MESSAGE, offerReload: !reconciled });
+    setNotice({ tone: "info", text: reconciled ? UNKNOWN_OUTCOME_MESSAGE : UNREACHABLE_MESSAGE, offerReload: !reconciled });
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {

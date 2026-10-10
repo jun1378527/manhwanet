@@ -38,6 +38,12 @@ export function countryLabel(code: string): string {
   return name && name !== code ? `${name} (${code})` : code;
 }
 
+/** 국가 코드를 이름만으로 표시한다(카드처럼 좁은 곳용). 예) "KR" → "대한민국". 이름을 알 수 없으면 코드. */
+export function countryName(code: string): string {
+  const name = safeOf(regionNames, code);
+  return name && name.trim() !== "" ? name : code;
+}
+
 /** 언어 태그를 "영어 (en)" 형태로 표시한다. */
 export function languageLabel(tag: string): string {
   const name = safeOf(languageNames, tag);

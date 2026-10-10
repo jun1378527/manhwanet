@@ -37,7 +37,7 @@ type Props = {
 };
 
 type Mine = MyReviewState | { status: "switched" };
-type Notice = { tone: "success" | "error"; text: string; offerReload?: boolean };
+type Notice = { tone: "success" | "error" | "info"; text: string; offerReload?: boolean };
 type FieldErrors = { body: string | null; spoiler: string | null; other: string | null };
 /**
  * 충돌: 작성 중인 글을 지우지 않고 최신 리뷰를 함께 보여 준다. 사용자가 고르기 전에는 아무 요청도 보내지 않는다.
@@ -384,7 +384,7 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
         const latest = await readLatest();
         if (latest.kind !== "ok") {
           if (latest.kind === "failed") {
-            setNotice({ tone: "error", text: REVIEW_UNREACHABLE_MESSAGE, offerReload: true });
+            setNotice({ tone: "info", text: REVIEW_UNREACHABLE_MESSAGE, offerReload: true });
           }
           return;
         }
@@ -491,7 +491,7 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
           const latest = await readLatest();
           if (latest.kind !== "ok") {
             if (latest.kind === "failed") {
-              setNotice({ tone: "error", text: REVIEW_UNREACHABLE_MESSAGE, offerReload: true });
+              setNotice({ tone: "info", text: REVIEW_UNREACHABLE_MESSAGE, offerReload: true });
             }
             return;
           }
