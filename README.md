@@ -66,7 +66,7 @@ manhwanet/
 
 - **JDK 21** (Gradle toolchain이 Java 21을 요구합니다. `java -version`으로 확인)
 - **Docker** + Docker Compose v2 (`docker compose version`)
-- **Node.js 24** 및 npm. 지원 범위는 `>=24.19.0 <25`입니다. 이 환경에서 설치하고 `npm ci`, 테스트, lint, build를 실행해 확인한 버전은 **24.19.0**입니다.
+- **Node.js 24** 및 npm. 지원 범위는 `>=24.19.0 <25`입니다. 2026-10-10에 Windows에서 설치하고 `npm ci`, 테스트, lint, build를 실행해 확인한 버전은 **Node.js 24.21.0 (npm 11.19.0, OpenSSL 3.5.8)** 입니다. 24.19.0·24.20.0에 포함된 OpenSSL 3.5.7은 2026-08-25 OpenSSL 보안 권고의 수정 전 버전이므로 24.21.0 이상을 권장합니다.
 - Gradle은 설치할 필요 없습니다. (`gradlew` Wrapper가 8.14.3을 내려받습니다.)
 
 Node.js 20은 2026-04-30에 지원이 끝났습니다. 2026-10-06 기준 지원 중인 LTS는 24(Active, 2026-10-20부터 Maintenance, 지원 종료 2028-04-30)와 22(Maintenance, 지원 종료 2027-04-30)입니다. 26은 2026-10-28에 LTS가 되기 전까지 Current입니다. 프론트엔드 잠금 파일의 `eslint-visitor-keys@5.0.1`은 `^20.19.0 || ^22.13.0 || >=24`, `@napi-rs/wasm-runtime@1.2.5`는 `^20.19.0 || ^22.13.0 || >=23.5.0`을 요구합니다. Next.js 16.3.8은 `>=20.9.0`입니다. 이 조건을 모두 만족하는 Active LTS로 24를 사용합니다.
@@ -82,15 +82,18 @@ winget uninstall --id OpenJS.NodeJS.20 --exact
 winget install --id OpenJS.NodeJS.LTS --exact
 ```
 
-2026-10-06에 `OpenJS.NodeJS.LTS`는 24.19.0입니다. nodejs.org의 24 최신 패치는 24.21.0이지만, 그 MSI는 이 환경에서 관리자 권한 부족으로 설치하지 못했습니다. 설치 뒤 **새** PowerShell에서 확인합니다.
+2026-10-10 기준 winget `OpenJS.NodeJS.LTS`의 최신은 24.20.0(OpenSSL 3.5.7)이고 24.21.0은 아직 없습니다. 이 경우 nodejs.org의 공식 Windows x64 MSI(`node-v24.21.0-x64.msi`)를 **관리자 권한** PowerShell에서 실행해 기존 설치를 업데이트합니다. 같은 "Node.js" MSI 제품이 그 자리에서 교체되므로 설치가 두 개로 늘지 않습니다. 실행 전에 MSI의 SHA256이 공식 `SHASUMS256.txt`와 같은지, 서명자가 OpenJS Foundation인지 확인합니다. 관리자 권한 없이 실행하면 Windows Installer 오류 1925로 실패합니다.
+
+설치 뒤 **새** PowerShell에서 확인합니다.
 
 ```powershell
 node -v
 npm -v
-Get-Command node | Select-Object -ExpandProperty Source
+node -p "process.versions.openssl"
+Get-Command node -All | Select-Object -ExpandProperty Source
 ```
 
-`node -v`가 `v24.19.0`이고 경로가 `C:\Program Files\nodejs\node.exe`이면 됩니다.
+`node -v`가 `v24.21.0` 이상(25 미만), OpenSSL이 `3.5.8` 이상이고, 경로가 `C:\Program Files\nodejs\node.exe` 하나뿐이면 됩니다.
 
 ## 빠른 시작
 
