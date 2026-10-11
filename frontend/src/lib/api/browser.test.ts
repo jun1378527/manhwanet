@@ -149,8 +149,40 @@ describe("toResult", () => {
     for (const status of [502, 503, 504]) {
       assert.deepEqual(await toResult(json(status, { success: false }), readAny), { kind: "unavailable" });
     }
+    // 프록시 연결 실패(503 SERVICE_UNAVAILABLE), 본문 없는 503, JSON 이 아닌 503, 다른 코드의 503
+    assert.deepEqual(
+      await toResult(json(503, { success: false, error: { code: "SERVICE_UNAVAILABLE", message: "x" } }, { "retry-after": "1" }), readAny),
+      { kind: "unavailable" },
+    );
+    assert.deepEqual(await toResult(new Response(null, { status: 503 }), readAny), { kind: "unavailable" });
+    assert.deepEqual(await toResult(raw(503, "<html>busy</html>"), readAny), { kind: "unavailable" });
+    assert.deepEqual(await toResult(json(503, { success: false, error: "AUTH_BUSY" }), readAny), { kind: "unavailable" });
+    // 502·504 는 본문이 AUTH_BUSY 여도 연결 실패
+    for (const status of [502, 504]) {
+      assert.deepEqual(
+        await toResult(json(status, { success: false, error: { code: "AUTH_BUSY" } }), readAny),
+        { kind: "unavailable" },
+      );
+    }
     assert.deepEqual(await toResult(raw(500, "<html>"), readAny), { kind: "unavailable" });
     assert.deepEqual(await toResult(raw(200, "<html>"), readAny), { kind: "unavailable" });
+  });
+
+  it("returns 503 AUTH_BUSY as an error with Retry-After, distinct from an outage", async () => {
+    const result = await toResult(
+      json(503, { success: false, error: { code: "AUTH_BUSY", message: "요청이 많아 지금은 처리할 수 없습니다." } }, { "retry-after": "1" }),
+      readAny,
+    );
+    assert.deepEqual(result, {
+      kind: "error",
+      status: 503,
+      code: "AUTH_BUSY",
+      message: "요청이 많아 지금은 처리할 수 없습니다.",
+      fieldErrors: [],
+      retryAfterSeconds: 1,
+    });
+    const noHeader = await toResult(json(503, { success: false, error: { code: "AUTH_BUSY" } }), readAny);
+    assert.equal(noHeader.kind === "error" ? noHeader.retryAfterSeconds : "x", null);
   });
 
   it("treats a success body of an unexpected shape as unavailable", async () => {

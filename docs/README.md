@@ -7,4 +7,5 @@
 - [auth-design-draft.md](auth-design-draft.md) — 회원·인증 **확정 명세** (로그인·세션·CSRF·쿠키·실패 제한·관리자 생성·접근 규칙)
 - [rating-design-draft.md](rating-design-draft.md) — 작품 별점 **확정 명세** (점수·데이터 모델·API·집계·동시성 보장 범위·테스트)
 - [review-design-draft.md](review-design-draft.md) — 작품 리뷰 **확정 명세** (작성 정책·본문 규칙·데이터 모델·API·수정·삭제 충돌·목록·테스트). 백엔드 #19, 화면 #21 구현
+- [login-limit-design-draft.md](login-limit-design-draft.md) — 로그인 보호 **확정 명세** (#10: 계정별 제한·용량·전역 해시 게이트·429/503·Retry-After·검증 계획. 잠정 수치 포함). 구현 #28
 - [ui-design-draft.md](ui-design-draft.md) — UI 디자인 방향 **초안** (방향 A·B, 화면 시안, 공통 규칙, 디자인만/데이터·API 필요 구분). 시안 파일: [ui-mockups/manhwanet-ui-mockups.html](ui-mockups/manhwanet-ui-mockups.html)

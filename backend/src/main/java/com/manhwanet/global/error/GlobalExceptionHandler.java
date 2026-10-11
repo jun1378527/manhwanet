@@ -34,9 +34,9 @@ public class GlobalExceptionHandler {
         return toResponse(e.getErrorCode(), e.getMessage(), List.of());
     }
 
-    /** 요청 제한(429). Retry-After 헤더를 함께 보낸다. */
-    @ExceptionHandler(TooManyRequestsException.class)
-    public ResponseEntity<ApiResponse<Void>> handleTooManyRequests(TooManyRequestsException e) {
+    /** 요청 제한(429)·일시적 과부하(503). Retry-After 헤더를 함께 보낸다. */
+    @ExceptionHandler(RetryLaterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleRetryLater(RetryLaterException e) {
         return ResponseEntity
                 .status(e.getErrorCode().getStatus())
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))

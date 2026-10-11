@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { parseRetryAfter, type ApiFailure } from "./client-api";
-import { CSRF_FAILED_MESSAGE, UNAVAILABLE_MESSAGE, feedbackFor, retryAfterText } from "./messages";
+import { CSRF_FAILED_MESSAGE, UNAVAILABLE_MESSAGE, authBusyMessage, feedbackFor, retryAfterText } from "./messages";
 
 function failure(partial: Partial<ApiFailure>): ApiFailure {
   return {
@@ -51,6 +51,18 @@ describe("feedbackFor", () => {
   it("explains 429 with Retry-After", () => {
     const feedback = feedbackFor(failure({ status: 429, code: "TOO_MANY_LOGIN_ATTEMPTS", retryAfterSeconds: 900 }), "login");
     assert.equal(feedback.formError, "로그인 시도가 너무 많습니다. 약 15분 후 다시 시도해 주세요.");
+  });
+
+  it("explains 503 AUTH_BUSY as overload with Retry-After, not as an outage", () => {
+    for (const context of ["login", "signup"] as const) {
+      const feedback = feedbackFor(failure({ status: 503, code: "AUTH_BUSY", retryAfterSeconds: 1 }), context);
+      assert.equal(feedback.formError, "요청이 많습니다. 약 1초 후 다시 시도해 주세요.");
+      assert.notEqual(feedback.formError, UNAVAILABLE_MESSAGE);
+      assert.deepEqual(feedback.fieldErrors, {});
+    }
+    // 저장소 포화는 Retry-After 가 분 단위일 수 있다(올림)
+    assert.equal(authBusyMessage(841), "요청이 많습니다. 약 15분 후 다시 시도해 주세요.");
+    assert.equal(authBusyMessage(null), "요청이 많습니다. 잠시 후 다시 시도해 주세요.");
   });
 
   it("puts duplicate email on the email input when signing up", () => {

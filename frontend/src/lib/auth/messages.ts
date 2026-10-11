@@ -14,6 +14,10 @@ export type FormFeedback = {
 const FIELD_NAMES: ReadonlySet<string> = new Set<FieldName>(["email", "nickname", "password"]);
 
 export const UNAVAILABLE_MESSAGE = "서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.";
+/** 서버가 과부하로 지금은 처리하지 않음(503 AUTH_BUSY). 연결 실패와 구분한다. 자동으로 다시 보내지 않는다. */
+export function authBusyMessage(retryAfterSeconds: number | null): string {
+  return `요청이 많습니다. ${retryAfterText(retryAfterSeconds)} 다시 시도해 주세요.`;
+}
 export const CSRF_FAILED_MESSAGE = "보안 토큰을 확인하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.";
 
 /** Retry-After 초를 "약 N분" 으로 바꾼다. */
@@ -61,6 +65,8 @@ export function feedbackFor(result: Exclude<ApiCallResult<unknown>, { kind: "ok"
         fieldErrors: {},
         formError: `로그인 시도가 너무 많습니다. ${retryAfterText(result.retryAfterSeconds)} 다시 시도해 주세요.`,
       };
+    case "AUTH_BUSY":
+      return { fieldErrors: {}, formError: authBusyMessage(result.retryAfterSeconds) };
     case "DUPLICATE_RESOURCE":
       return context === "signup"
         ? { fieldErrors: { email: result.message ?? "이미 가입된 이메일입니다." }, formError: null }

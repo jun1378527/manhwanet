@@ -37,3 +37,34 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+// ---------- 측정 도구 (docs/login-limit-design-draft.md §10). 테스트 소스에 두며 `test`·`build` 에서는 실행되지 않는다 ----------
+// 인자는 -PbenchArgs="..." 로 넘긴다. 예) gradlew hashBenchmark -PbenchArgs="--concurrency 1,2,4,8 --seconds 5"
+def benchmarkArgs = { -> (project.findProperty('benchArgs') ?: '').toString().trim().split(/\s+/).findAll { it } }
+
+tasks.register('hashBenchmark', JavaExec) {
+    group = 'verification'
+    description = 'Argon2id 해시 처리량·지연·1회 할당량과 해시 게이트 경유 결과를 잰다 (M1·M2·M8)'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.manhwanet.benchmark.HashBenchmark'
+    jvmArgs '-Xmx512m'
+    doFirst { args benchmarkArgs() }
+}
+
+tasks.register('limiterMemory', JavaExec) {
+    group = 'verification'
+    description = '로그인 제한기 항목당 메모리를 잰다 (이메일 45자·254자, 실패 1·4회, 잠금)'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.manhwanet.benchmark.LimiterMemoryBenchmark'
+    jvmArgs '-Xmx1g'
+    doFirst { args benchmarkArgs() }
+}
+
+tasks.register('loginLoad', JavaExec) {
+    group = 'verification'
+    description = '실행 중인 서버에 없는 이메일 로그인 부하를 주고 지연·상태·/health 지연을 잰다 (실제 API)'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.manhwanet.benchmark.LoginLoadTest'
+    doFirst { args benchmarkArgs() }
+}
+

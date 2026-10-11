@@ -41,8 +41,15 @@ server:
 manhwanet:
   auth:
     login-limit:
-      # 개발 단계 기본값: 이메일 키당 15분 내 5회 실패 → 15분 거절. 서버 메모리, 최대 10,000개 키.
+      # 이메일 키당 15분 내 5회 실패 → 15분 거절(확정). 서버 메모리.
+      # max-entries 46,000은 512MiB 측정(키당 922B, 10% 예산의 80%)의 초기값이다.
+      # 가득 차면 신규 이메일 로그인만 503 AUTH_BUSY. 1GiB에서 다시 잴 때의 예시는 93,000(명세 §14.4).
       max-failures: 5
       window: 15m
       lock-duration: 15m
-      max-entries: 10000
+      max-entries: 46000
+    # 로그인 검증·가입 해시 생성의 공통 부하 제한(잠정값, §5.2). 운영 장비에서 측정 후 조정한다.
+    hash-limit:
+      max-concurrent: 2
+      max-waiting: 4
+      max-wait: 250ms

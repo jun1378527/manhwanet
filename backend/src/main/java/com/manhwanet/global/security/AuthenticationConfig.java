@@ -30,7 +30,7 @@ import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
  * HttpSecurity 에 의존하는 SecurityFilterChain 은 {@link WebSecurityConfig} 에 따로 둔다.
  */
 @Configuration
-@EnableConfigurationProperties(LoginLimitProperties.class)
+@EnableConfigurationProperties({LoginLimitProperties.class, HashLimitProperties.class})
 public class AuthenticationConfig {
 
     /** OWASP Password Storage Cheat Sheet 의 Argon2id 최소 설정: m=19 MiB, t=2, p=1 */

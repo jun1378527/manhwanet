@@ -26,7 +26,7 @@ export type ApiFailure = {
 export type ApiCallResult<T> =
   | { kind: "ok"; status: number; data: T }
   | ApiFailure
-  /** 연결 실패, 시간 초과, 502·503·504, JSON 이 아닌 응답 */
+  /** 연결 실패, 시간 초과, 502·504, AUTH_BUSY 가 아닌 503, JSON 이 아닌 응답 */
   | { kind: "unavailable" };
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -127,10 +127,23 @@ export function parseRetryAfter(value: string | null): number | null {
   return Number(value.trim());
 }
 
-/** 응답을 결과 값으로 바꾼다. 204·205·304 는 본문을 읽거나 파싱하지 않는다. */
+/**
+ * 백엔드가 요청을 처리하지 않고 과부하로 거절했다는 오류 코드(503, Retry-After 포함).
+ * 로그인·가입의 비밀번호 해시 과부하와 로그인 제한 저장소 포화에 쓴다. 연결 실패와 달리 서버는 응답했다.
+ */
+export const AUTH_BUSY_CODE = "AUTH_BUSY";
+
+/**
+ * 응답을 결과 값으로 바꾼다. 204·205·304 는 본문을 읽거나 파싱하지 않는다.
+ * 503 은 JSON 본문의 error.code 가 AUTH_BUSY 일 때만 오류 결과(Retry-After 포함)이고, 그 밖의 503
+ * (프록시 연결 실패 SERVICE_UNAVAILABLE, JSON 이 아닌 본문 등)과 502·504 는 연결 실패(unavailable)다.
+ */
 export async function toResult<T>(response: Response, readData: DataReader<T>): Promise<ApiCallResult<T>> {
-  if (response.status === 502 || response.status === 503 || response.status === 504) {
+  if (response.status === 502 || response.status === 504) {
     return { kind: "unavailable" };
+  }
+  if (response.status === 503) {
+    return authBusyResult(response);
   }
 
   let parsed: ParsedBody | undefined;
@@ -172,6 +185,27 @@ export async function toResult<T>(response: Response, readData: DataReader<T>): 
     code: typeof error.code === "string" ? error.code : undefined,
     message: typeof error.message === "string" ? error.message : undefined,
     fieldErrors,
+    retryAfterSeconds: parseRetryAfter(response.headers.get("retry-after")),
+  };
+}
+
+async function authBusyResult(response: Response): Promise<ApiCallResult<never>> {
+  let parsed: ParsedBody | undefined;
+  try {
+    parsed = parseApiBody(await response.text()) as ParsedBody;
+  } catch {
+    return { kind: "unavailable" };
+  }
+  const error = typeof parsed === "object" && parsed !== null ? parsed.error : undefined;
+  if (typeof error !== "object" || error === null || error.code !== AUTH_BUSY_CODE) {
+    return { kind: "unavailable" };
+  }
+  return {
+    kind: "error",
+    status: 503,
+    code: AUTH_BUSY_CODE,
+    message: typeof error.message === "string" ? error.message : undefined,
+    fieldErrors: [],
     retryAfterSeconds: parseRetryAfter(response.headers.get("retry-after")),
   };
 }

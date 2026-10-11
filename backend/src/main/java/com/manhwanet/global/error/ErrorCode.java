@@ -22,6 +22,8 @@ public enum ErrorCode {
     INVALID_CSRF_TOKEN(HttpStatus.FORBIDDEN, "CSRF 토큰이 없거나 올바르지 않습니다."),
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
     TOO_MANY_LOGIN_ATTEMPTS(HttpStatus.TOO_MANY_REQUESTS, "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요."),
+    /** 로그인·가입의 비밀번호 해시 과부하 또는 로그인 제한 저장소 포화(신규 이메일). Retry-After 로 회복 시점을 알린다 */
+    AUTH_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "요청이 많아 지금은 처리할 수 없습니다. 잠시 후 다시 시도해 주세요."),
 
     // work
     WORK_NOT_FOUND(HttpStatus.NOT_FOUND, "작품을 찾을 수 없습니다."),

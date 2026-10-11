@@ -227,8 +227,10 @@ cd backend
 | `PaginationLimitIntegrationTest` | 작품·작가·리뷰 목록의 최대 지원 page(200)와 바로 다음 값·음수·int 초과·형식 오류(400 `fieldErrors`), 거절 시 SQL 미실행 (#20) | O |
 | `WorkControllerTest`, `CreatorControllerTest` | 페이지·정렬 파라미터 검증, 404 | X |
 | `WorkCreatorMigrationTest` | V2 적용, 제약·인덱스 이름, DB 제약 동작 | O |
-| `PasswordPolicyTest`, `AccountFieldsTest`, `LoginAttemptLimiterTest`, `CreateAdminCommandTest` | 비밀번호 정책·정규화, 이메일·닉네임, 로그인 실패 제한(동시성·만료), 관리자 명령 입력 | X |
+| `PasswordPolicyTest`, `AccountFieldsTest`, `LoginAttemptLimiterTest`, `CreateAdminCommandTest` | 비밀번호 정책·정규화, 이메일·닉네임, 로그인 실패 제한(동시성·만료·완료 순서·잠금 보존·용량 상한·포화 `Retry-After`·최악 유지 시간), 관리자 명령 입력 | X |
+| `PasswordHashGateTest`, `AuthServiceProtectionTest` | 해시 게이트(동시 해시 ≤ P, 대기 ≤ Q, 거절 결정 시간, 인터럽트), 획득·해제 순서와 예외·시간 초과·인터럽트 후 누수 없음 (#28) | X |
 | `AuthApiIntegrationTest` | 가입·로그인·로그아웃·me, CSRF 발급·교체·누락, 세션 ID 변경, 실패 제한 | O |
+| `LoginProtectionIntegrationTest`, `LoginStoreSaturationIntegrationTest` | 503 `AUTH_BUSY`(로그인·가입 공통, 없는 이메일·있는 이메일 동일, 실패 미집계), `admin-cli` 제외, 저장소 포화 시 잠금 유지·신규 이메일 503·기존 키 정상, 로그에 이메일·비밀번호 없음 (#28) | O |
 | `AdminAuthorizationIntegrationTest` | 등록 API 접근 규칙: 익명 401, USER 403, ADMIN 허용, CSRF 누락 403 | O |
 | `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |
 | `SessionCookieHttpTest`, `LocalSessionCookieHttpTest` | 실제 HTTP 응답의 쿠키 속성(`__Host-`, local), 세션 흐름, ERROR 디스패치, loopback 바인딩 | O |
@@ -250,6 +252,20 @@ cd backend
 - 등록 API 통합 테스트는 ADMIN 사용자와 CSRF 토큰으로 요청합니다(spring-security-test).
 
 테스트 리포트: `backend/build/reports/tests/test/index.html`
+
+#### 로그인 보호 측정 도구 (#28)
+
+`test`·`build`에서는 실행되지 않는 별도 작업입니다. 운영 코드와 분리된 테스트 소스(`com.manhwanet.benchmark`)에 있습니다. 결과 해석과 재조정 기준은 [docs/login-limit-design-draft.md](docs/login-limit-design-draft.md) §5.2·§10·§14를 보세요.
+
+```powershell
+cd backend
+.\gradlew.bat hashBenchmark                    # Argon2id 동시성별 처리량·p50·p95, 1회 할당량, 게이트(P·Q·W) 경유 결과 (DB 불필요)
+.\gradlew.bat limiterMemory                    # 제한기 항목당 메모리: 이메일 45·254자, 실패 1·4회, 잠금, 320자 UTF-16 최악 (DB 불필요)
+.\gradlew.bat loginLoad -PbenchArgs="--base http://127.0.0.1:8080/api/v1 --concurrency 16,64,128"   # 실행 중인 서버에 부하
+```
+
+- `loginLoad`는 무작위 `example.test` 주소(없는 이메일)로만 로그인하므로 DB에 계정·데이터를 만들지 않습니다(서버 메모리의 제한기 항목만 생김). 그래도 개발 DB 대신 테스트용 DB에 연결한 서버에서 실행하기를 권장합니다.
+- 인자 예: `-PbenchArgs="--concurrency 1,2,4,8 --seconds 5 --gate-p 2 --gate-q 4 --gate-wait-ms 250"`
 
 ### Frontend
 
@@ -278,6 +294,23 @@ npm run build
 - `.env`는 Java `.properties` 형식으로 읽히므로 값에 따옴표를 쓰지 마세요.
 - 운영 등 다른 환경에서는 `.env` 대신 OS 환경변수로 주입합니다. (`.env` import는 `local`, `test` 프로필에만 있습니다.)
 
+### 로그인 보호 설정 (선택, #28)
+
+기본값은 `application.yml`에 있고 바꾸지 않아도 됩니다. 잠정값이므로 운영 장비에서 측정 후 조정합니다([명세 §2·§5.2](docs/login-limit-design-draft.md)).
+
+| 속성 (`.env`·명령행) | OS 환경변수 | 기본값 | 허용 범위 |
+| --- | --- | --- | --- |
+| `manhwanet.auth.hash-limit.max-concurrent` | `MANHWANET_AUTH_HASH_LIMIT_MAX_CONCURRENT` | `2` | 1 이상 |
+| `manhwanet.auth.hash-limit.max-waiting` | `MANHWANET_AUTH_HASH_LIMIT_MAX_WAITING` | `4` | 0 이상 (0 = 자리가 없으면 바로 503) |
+| `manhwanet.auth.hash-limit.max-wait` | `MANHWANET_AUTH_HASH_LIMIT_MAX_WAIT` | `250ms` | 0 초과 1s 이하 |
+| `manhwanet.auth.login-limit.max-entries` | `MANHWANET_AUTH_LOGIN_LIMIT_MAX_ENTRIES` | `46000` | 1 이상. 512MiB 초기값. 가득 차면 신규 이메일 로그인만 503. 1GiB 재측정 예시는 `93000` |
+| `manhwanet.auth.login-limit.max-failures`·`window`·`lock-duration` | (같은 규칙) | `5`·`15m`·`15m` | 확정 정책. 바꾸지 않습니다 |
+
+- `.env`에는 **속성 이름(소문자·점)** 으로 씁니다. 예: `manhwanet.auth.hash-limit.max-concurrent=3`. `.env`는 `.properties`로 읽히므로 `MANHWANET_...` 대문자 이름은 무시됩니다(오류 없이 기본값 사용). 대문자 이름은 OS 환경변수에서만 동작합니다.
+- 명령행: `java -jar ... --manhwanet.auth.hash-limit.max-concurrent=3`
+- 범위를 벗어나면 서버가 시작되지 않고 `manhwanet.auth.hash-limit.max-wait must be > 0 and <= 1s`처럼 이유를 남깁니다.
+- 적용된 값은 시작 로그 `login-protection config: ...` 한 줄로 확인합니다.
+
 ### `frontend/.env.local`
 
 | 이름 | 설명 | 기본값 |
@@ -297,8 +330,8 @@ npm run build
 | GET | `/api/v1/creators` | 작가 목록 (`page`, `size`, `sort`) |
 | GET | `/api/v1/creators/{creatorId}` | 작가 상세 |
 | GET | `/api/v1/auth/csrf` | CSRF 토큰 쿠키(`XSRF-TOKEN`) 발급 |
-| POST | `/api/v1/auth/signup` | 가입(항상 USER) + 자동 로그인 |
-| POST | `/api/v1/auth/login` | 로그인 |
+| POST | `/api/v1/auth/signup` | 가입(항상 USER) + 자동 로그인. 해시 과부하 시 503 `AUTH_BUSY` + `Retry-After` |
+| POST | `/api/v1/auth/login` | 로그인. 계정 잠금·진행 중 한도 429 `TOO_MANY_LOGIN_ATTEMPTS`, 해시 과부하·제한 저장소 포화(신규 이메일) 503 `AUTH_BUSY`, 모두 `Retry-After` |
 | POST | `/api/v1/auth/logout` | 로그아웃 |
 | GET | `/api/v1/auth/me` | 현재 사용자 (로그인 필요) |
 | GET | `/api/v1/me/ratings/{workId}` | 내 별점 (로그인 필요). 평가하지 않았으면 `score: null` |

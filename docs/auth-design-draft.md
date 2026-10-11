@@ -3,6 +3,7 @@
 > **상태: 확정 — 2026-10-06 사용자 결정 반영, 백엔드 구현 완료(커밋 전).**
 > 파일 이름은 초안 때와 같지만 내용은 확정 명세입니다. 초안의 결정 항목 D-1~D-13은 §1에서 모두 결정되었습니다.
 > 프론트엔드(같은 출처 프록시, 로그인·가입 화면, 헤더 로그인 상태)는 §14에 정리했습니다(#12).
+> 로그인 보호(계정별 제한의 잠금 보존·용량, 해시 부하 제한, 429/503 구분)는 [login-limit-design-draft.md](login-limit-design-draft.md)(확정 명세, #10)를 따르며 #28에서 구현했습니다(§6.3·§9·§10·§11 갱신).
 
 - 관련 문서: [architecture.md](architecture.md), [work-creator-spec.md](work-creator-spec.md)
 - 기준: Spring Boot 3.5.16 / **Spring Security 6.5.11** / PostgreSQL 17
@@ -63,7 +64,8 @@
 | 입력 오류(이메일 형식, 닉네임·비밀번호 길이, 차단 목록 등) | 400 | INVALID_INPUT (`fieldErrors`) |
 | 이메일 중복(정규화 후) | 409 | DUPLICATE_RESOURCE |
 | 이메일 없음·비밀번호 틀림 | 401 | INVALID_CREDENTIALS (두 경우 응답 본문 동일) |
-| 실패 제한 | 429 + `Retry-After` | TOO_MANY_LOGIN_ATTEMPTS |
+| 실패 제한(계정 잠금·진행 중 시도 한도) | 429 + `Retry-After` | TOO_MANY_LOGIN_ATTEMPTS |
+| 해시 과부하(로그인·가입), 제한 저장소 포화(신규 이메일 로그인) | 503 + `Retry-After` | AUTH_BUSY |
 | 로그인 필요(익명) | 401 | UNAUTHORIZED |
 | 권한 부족 | 403 | FORBIDDEN |
 | CSRF 토큰 누락·불일치 | 403 | INVALID_CSRF_TOKEN |
@@ -126,11 +128,12 @@
 
 ### 6.1 로그인 절차
 
-1. 이메일 정규화 → 실패 제한 확인. 제한 중이면 비밀번호를 검증하지 않고 429를 반환합니다.
-2. `AuthenticationManager`(`DaoAuthenticationProvider`)로 검증합니다.
+1. 이메일 정규화 → 실패 제한 예약. 제한 중이면 비밀번호를 검증하지 않고 429를, 저장소가 가득 찬 신규 이메일이면 503 `AUTH_BUSY`를 반환합니다.
+2. 해시 게이트(`PasswordHashGate`) 자리를 얻습니다. 얻지 못하면 503 `AUTH_BUSY`이고 실패로 세지 않습니다(§6.3).
+3. `AuthenticationManager`(`DaoAuthenticationProvider`)로 검증합니다.
    - 사용자 없음과 비밀번호 틀림을 모두 `BadCredentialsException`으로 처리합니다.
    - 사용자가 없을 때도 더미 해시와 비교해 응답 시간 차이를 줄입니다.
-3. 성공 시 실패 기록을 초기화하고 세션을 확립합니다(§6.2). 실패 시 실패 1회를 기록하고 401을 반환합니다.
+4. 성공 시 실패 기록을 초기화하고 세션을 확립합니다(§6.2). 실패 시 실패 1회를 기록하고 401을 반환합니다. 게이트 자리와 예약은 `finally`에서 정확히 한 번 반환합니다.
 
 ### 6.2 세션 확립 (`AuthenticationSessionHandler`)
 
@@ -144,26 +147,42 @@ Spring Security 6.5 문서의 "직접 인증 정보 저장" 방식을 따르며,
 
 가입 자동 로그인도 **같은 처리기**를 사용합니다. 세션에 저장되는 principal(`AuthenticatedUser`)은 인증 후 비밀번호 해시를 지웁니다.
 
-### 6.3 실패 제한 (`LoginAttemptLimiter`)
+### 6.3 로그인 보호 (`LoginAttemptLimiter`, `PasswordHashGate`) — #28
 
-| 값 | 기본 (`manhwanet.auth.login-limit.*`) |
+상세 규칙·근거·측정은 [login-limit-design-draft.md](login-limit-design-draft.md)에 있습니다. 여기에는 요약만 둡니다.
+
+**계정별 제한** (`manhwanet.auth.login-limit.*`)
+
+| 값 | 기본 |
 |---|---|
 | 키 | 정규화된 이메일 (존재하지 않는 이메일도 동일 적용) |
-| 실패 한도 / 기간 | 5회 / 15분(슬라이딩) |
-| 거절 기간 | 15분 (`Retry-After` 초 단위) |
-| 최대 키 수 | 10,000 |
+| 실패 한도 / 기간 | 5회 / 15분(슬라이딩) [확정] |
+| 잠금 시간 | 15분 (`Retry-After` = 남은 시간 올림) [확정] |
+| 최대 키 수 | 46,000 [512MiB 측정 초기값]. 가득 차면 신규 이메일 로그인만 503. 1GiB 재측정 예시는 93,000 |
 
-- 성공하면 해당 키의 기록을 삭제합니다.
-- 키별 상태는 `ConcurrentHashMap.compute`로 원자적으로 바꿉니다. 결과가 나오지 않은 시도(in-flight)도 한도에 포함합니다. 그래서 동시 요청이 몰려도 한 기간에 한도보다 많은 비밀번호 검증이 일어나지 않고, 진행 중 시도가 한도를 채우면 `Retry-After: 1`로 거절합니다.
-- 요청 스레드를 재우는(sleep) 지연은 쓰지 않습니다.
-- 용량: 가득 차면 만료 항목을 먼저 정리하고, 그래도 가득 차면 진행 중 시도가 없는 가장 오래된 항목을 내보냅니다. 상한은 동시 요청 수만큼 일시적으로 넘을 수 있는 근사값이며, 내보낸 키는 제한 기록을 잃습니다.
+- 결과가 나오지 않은 시도(in-flight)도 한도에 포함합니다. 진행 중 시도가 한도를 채우면 `Retry-After: 1`로 거절합니다. 키별 상태는 `ConcurrentHashMap.compute`로 원자적으로 바꾸고, 완료는 적용 순서대로 반영합니다(성공은 실패·잠금 초기화, 성공 뒤의 실패는 1회부터).
+- 예약 객체는 한 번만 완료됩니다(`success`·`failure`·`releaseUncounted`, `close()`는 미완료일 때만 반환).
+- 용량: 활성 항목(기간 내 실패·잠금·진행 중)은 **지우지 않습니다**. 만료 항목만 1분 주기 정리와 포화 시 즉시 정리(1초에 최대 1회)로 지웁니다. 신규 키는 상한 안에서 자리를 원자적으로 예약한 뒤에만 받으므로 상한을 넘지 않습니다. 정리 후에도 가득 차면 **신규 이메일 로그인만** 503 `AUTH_BUSY`(`Retry-After` = 가장 이른 만료까지, 1~900초)이고, 기존 키는 평소대로 처리합니다. 이전 구현의 "가장 오래된 항목 내보내기"(잠금 소실)는 없앴습니다.
 
-**한계 (공개 운영 전 추가 대응 필요)**
-- 서버 재시작 시 기록이 사라집니다.
-- 여러 인스턴스 사이에 공유되지 않아, 인스턴스 수만큼 시도 기회가 늘어납니다.
-- 이메일 키 기준이라, 한 IP가 많은 이메일을 시도하는 분산 공격(credential stuffing)은 막지 못합니다.
-- 공격자가 타인 이메일을 15분간 잠글 수 있습니다(계정 잠금 악용).
-- 대응 후보: 공유 저장소(DB·Redis), IP·전역 기준 제한 추가(프록시 뒤 `X-Forwarded-For` 신뢰 설정 포함), 지연 기반 완화, 유출 비밀번호 확인, 모니터링
+**해시 게이트** (`manhwanet.auth.hash-limit.*`)
+
+| 값 | 기본 [잠정] |
+|---|---|
+| 동시 해시 `max-concurrent` | 2 |
+| 대기 `max-waiting` | 4 |
+| 최대 대기 `max-wait` | 250ms |
+
+- 로그인 검증(없는 이메일의 더미 해시 포함)과 가입 해시 생성에 공통으로 적용합니다. 관리자 생성 명령(`admin-cli`)은 적용하지 않습니다(`PasswordEncoder` Bean을 감싸지 않음).
+- 자리가 없고 대기가 가득 찼거나 `max-wait` 안에 얻지 못하면(대기 중 인터럽트 포함) 503 `AUTH_BUSY`, `Retry-After: 1`. 실패로 세지 않습니다.
+- 순서: 계정 예약 → 게이트 → 인증 → 결과 기록 → 자리 반환 → 예약 닫기. 잠긴 키는 게이트를 쓰지 않습니다.
+
+**로그**: 시작 시 설정값 1줄(INFO), 거절이 있었던 1분마다 사유별 개수 1줄(WARN). 이메일(원문·일부·해시)·비밀번호·IP는 남기지 않습니다.
+
+**한계 (후속)**
+- 서버 재시작 시 기록이 사라지고, 여러 인스턴스 사이에 공유되지 않습니다(#30).
+- 한 IP가 많은 이메일을 시도하는 분산 공격은 계정 키 기준으로 막지 못합니다. 해시 게이트는 서버 부하만 묶습니다(IP 제한 #29, #11 이후).
+- 공격자가 타인 이메일을 15분간 잠글 수 있습니다(계정 잠금 악용, 비밀번호 재설정 §13과 함께 다룸).
+- 가입 악용(대량 계정 생성)은 #31에서 다룹니다.
 
 ## 7. CSRF와 쿠키
 
@@ -222,7 +241,8 @@ java -jar build\libs\manhwanet-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 |---|---|
 | `server.servlet.session.timeout` | 30m |
 | `server.servlet.session.cookie.*` | §7.2 |
-| `manhwanet.auth.login-limit.*` | §6.3 |
+| `manhwanet.auth.login-limit.*` | §6.3 (최대 키 수 46,000) |
+| `manhwanet.auth.hash-limit.*` | §6.3 (동시 2, 대기 4, 최대 대기 250ms). 검증·변경 방법: login-limit 명세 §2.3 |
 | 환경변수 `MANHWANET_ADMIN_PASSWORD` | 관리자 생성 명령 전용(선택) |
 
 ## 10. 테스트
@@ -232,7 +252,13 @@ java -jar build\libs\manhwanet-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 | 테스트 | 검증 |
 |---|---|
 | `PasswordPolicyTest`, `AccountFieldsTest` | 15/128 코드 포인트 경계(이모지 포함), trim 없음, NFKC, 차단 목록, 이메일·닉네임·서비스명, 이메일·닉네임 정규화 |
-| `LoginAttemptLimiterTest` | 5회 후 잠금·15분 만료, 슬라이딩 기간, 성공 초기화, 키 독립, 동시 64요청 중 정확히 5회만 허용, 1,000키 동시 기록, 용량 상한·만료 정리 |
+| `LoginAttemptLimiterTest` | 5회 후 잠금·15분 만료, 잠금 중 거절이 잠금을 늘리지 않음, 슬라이딩 기간, 성공 초기화, 키 독립, 예약 1회 완료(동시 이중 완료 포함), 완료 순서 규칙, 잠금 전 시작 시도가 잠금을 만들면 진행 중이 0, 잠금 종료와 슬롯 회수 구분, 동시 64요청 중 정확히 5회만 허용, 잠금 보존(M5 수정)·포화 시 신규 503·기존 키 정상·만료 후 수용·동시 삽입 상한·주기 정리·포화 `Retry-After`(1초 스캔 제한·900초 상한)·최악 유지 시간 |
+| `SignupAccountStoreTest` | `uk_users_email`만 409. 다른 제약 위반은 전파 |
+| `SignupConnectionIntegrationTest` | 게이트 대기·해시 중 DB 연결 없음, 해시 예외·대기 중 인터럽트 후 게이트 반환·미저장, 동시 동일 이메일 1건 저장·나머지 롤백, 커밋된 가입만 자동 로그인 |
+| `PasswordHashGateTest` | 동시 128에서 동시 해시 ≤ P·대기 ≤ Q·거절 결정 < W+100ms, 대기 4건의 획득 순서가 도착 순서와 같음, 대기열이 찬 뒤의 호출은 앞지르지 않음, 대기 0, 시간 초과, 대기 중 인터럽트(플래그 복원), 이미 인터럽트된 호출, 이중 반환, 설정 검증 |
+| `AuthServiceProtectionTest` | 게이트 거절이 실패로 세지지 않음, 잠긴 키는 게이트 전 429, 인증 외 예외·Error·대기 시간 초과·인터럽트 후 누수 0, 동시 2,000요청 혼합 후 회복 |
+| `LoginProtectionIntegrationTest` | 실제 DB·Argon2id: 과부하 503 응답이 없는 이메일·있는 이메일에서 동일, 실패 미집계, 401 동일 응답 유지, 가입 게이트(저장 없음), 중복 가입은 해시 없이 409, `admin-cli` 서비스 게이트 미적용, 로그에 이메일·비밀번호 없음 |
+| `LoginStoreSaturationIntegrationTest` | 실제 저장소 포화(상한 3): 잠금 유지, 신규 이메일 503·`Retry-After`, 기존 키 정상 처리 |
 | `AuthApiIntegrationTest` | CSRF 발급·누락·불일치, 가입·role 무시·Argon2 해시·자동 로그인·세션 ID 변경, 중복 409, 닉네임 중복 허용, 경계값, trim 없음, NFKC 로그인, 로그인 세션 유지·ID 변경·CSRF 교체, 동일 실패 응답, 로그아웃 세션 무효화·CSRF 삭제, 실패 제한(존재하지 않는 이메일 포함, 성공 초기화) |
 | `AdminAuthorizationIntegrationTest` | 익명+CSRF 401, USER+CSRF 403, ADMIN 201, CSRF 누락 403, 다른 토큰 403, 공개 GET 유지 |
 | `AdminAccountServiceTest`, `CreateAdminCommandTest`, `AdminCliProfileTest` | 생성·기존 ADMIN 변경 없음·USER 거부·입력 오류, 비밀번호 비노출, 일반 실행에 명령 없음, `admin-cli` 프로필이 비웹으로 실행·생성·재실행 |
@@ -247,7 +273,8 @@ java -jar build\libs\manhwanet-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ## 11. 운영 전 확인 사항
 
 - HTTPS 종단과 `Secure` 쿠키. 프록시 뒤라면 `server.forward-headers-strategy` 설정이 필요합니다.
-- 실패 제한의 공유 저장소·IP 기준 제한(§6.3)
+- 로그인 보호 수치(해시 게이트 P·Q·W, `max-entries`)를 운영 장비에서 다시 측정해 확정(login-limit 명세 §5.2·§10). 클라우드 측정값은 운영 장비의 값이 아닙니다.
+- 실패 제한의 공유 저장소(#30)·IP 기준 제한(#29, #11 이후)
 - 세션 저장소: 메모리 세션은 재시작 시 전원 로그아웃되고 다중 인스턴스를 지원하지 않습니다. 배포 형태에 따라 Spring Session JDBC 등을 검토합니다.
 - 이메일 인증·비밀번호 재설정(§13)
 
