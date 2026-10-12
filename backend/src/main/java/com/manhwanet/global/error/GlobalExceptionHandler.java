@@ -34,6 +34,16 @@ public class GlobalExceptionHandler {
         return toResponse(e.getErrorCode(), e.getMessage(), List.of());
     }
 
+    /** 관리자 수정의 버전 충돌(409). 현재 버전을 함께 보낸다. */
+    @ExceptionHandler(VersionConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleVersionConflict(VersionConflictException e) {
+        log.debug("Version conflict: code={}, currentVersion={}", e.getErrorCode(), e.getCurrentVersion());
+        return ResponseEntity
+                .status(e.getErrorCode().getStatus())
+                .body(ApiResponse.failure(ApiError.versionConflict(
+                        e.getErrorCode(), e.getMessage(), e.getCurrentVersion())));
+    }
+
     /** 요청 제한(429)·일시적 과부하(503). Retry-After 헤더를 함께 보낸다. */
     @ExceptionHandler(RetryLaterException.class)
     public ResponseEntity<ApiResponse<Void>> handleRetryLater(RetryLaterException e) {

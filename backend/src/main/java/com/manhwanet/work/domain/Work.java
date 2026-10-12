@@ -39,6 +39,10 @@ public class Work extends BaseTimeEntity {
     @Column(name = "description")
     private String description;
 
+    /** 관리자 수정 버전. DB 기본값 0 으로 생성되고 조건부 UPDATE(WorkRepository)로만 바뀐다. */
+    @Column(name = "version", nullable = false, insertable = false, updatable = false)
+    private Long version = 0L;
+
     @OneToMany(mappedBy = "work", cascade = CascadeType.PERSIST)
     private List<WorkTitle> titles = new ArrayList<>();
 
@@ -80,6 +84,15 @@ public class Work extends BaseTimeEntity {
         return work;
     }
 
+    /**
+     * 수정(전체 교체)할 제목·크레딧이 생성과 같은 불변식을 지키는지 확인한다.
+     * 서비스에서 검증한 값이어야 하며, 위반하면 프로그래밍 오류로 보고 IllegalArgumentException 을 던진다.
+     */
+    public static void validateReplacement(List<WorkTitleDraft> titles, List<WorkCreditDraft> credits) {
+        validateTitles(titles);
+        validateCredits(credits);
+    }
+
     private static void validateTitles(List<WorkTitleDraft> titles) {
         if (titles == null || titles.isEmpty()) {
             throw new IllegalArgumentException("work must have at least one title");
@@ -119,6 +132,10 @@ public class Work extends BaseTimeEntity {
 
     public String getDescription() {
         return description;
+    }
+
+    public Long getVersion() {
+        return version;
     }
 
     public List<WorkTitle> getTitles() {

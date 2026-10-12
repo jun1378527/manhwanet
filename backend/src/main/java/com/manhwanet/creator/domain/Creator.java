@@ -28,6 +28,10 @@ public class Creator extends BaseTimeEntity {
     @Column(name = "original_name", length = NAME_MAX_LENGTH)
     private String originalName;
 
+    /** 관리자 수정 버전. DB 기본값 0 으로 생성되고 조건부 UPDATE(CreatorRepository)로만 바뀐다. */
+    @Column(name = "version", nullable = false, insertable = false, updatable = false)
+    private Long version = 0L;
+
     protected Creator() {
     }
 
@@ -60,5 +64,9 @@ public class Creator extends BaseTimeEntity {
 
     public String getOriginalName() {
         return originalName;
+    }
+
+    public Long getVersion() {
+        return version;
     }
 }

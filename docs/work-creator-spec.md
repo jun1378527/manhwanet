@@ -197,6 +197,8 @@ fieldErrors의 field 경로 예: `workFormat`, `titles`, `titles[1].languageCode
 | GET | `/api/v1/works/{workId}` | 작품 상세 조회 | 200 |
 | GET | `/api/v1/works` | 작품 목록 (페이지) | 200 |
 
+> 작품·작가 관리자 조회·수정(`GET/PUT /api/v1/admin/works/{workId}`, `GET/PUT /api/v1/admin/creators/{creatorId}`)은 #38 에서 추가했습니다. 규칙은 [work-platform-admin-spec.md](work-platform-admin-spec.md) §5.1·§5.2에 있습니다. 수정의 입력 검증은 이 문서 §3·§4의 등록 규칙과 같습니다.
+
 ### 5.1 작가 등록
 
 ```http

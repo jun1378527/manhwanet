@@ -232,6 +232,9 @@ cd backend
 | `AuthApiIntegrationTest` | 가입·로그인·로그아웃·me, CSRF 발급·교체·누락, 세션 ID 변경, 실패 제한 | O |
 | `LoginProtectionIntegrationTest`, `LoginStoreSaturationIntegrationTest` | 503 `AUTH_BUSY`(로그인·가입 공통, 없는 이메일·있는 이메일 동일, 실패 미집계), `admin-cli` 제외, 저장소 포화 시 잠금 유지·신규 이메일 503·기존 키 정상, 로그에 이메일·비밀번호 없음 (#28) | O |
 | `AdminAuthorizationIntegrationTest` | 등록 API 접근 규칙: 익명 401, USER 403, ADMIN 허용, CSRF 누락 403 | O |
+| `WorkAdminUpdateApiIntegrationTest` | 작품·작가 관리자 조회·수정: 익명 401·USER 403·CSRF 누락 403, 대표 제목·크레딧 교체, 오래된·미래 version 409(`currentVersion`), 같은 내용은 version 유지, 입력 오류 400, 없는 작품·작가 404, 별점·리뷰·ID 보존 (#38) | O |
+| `WorkAdminConcurrencyTest` | 같은 version 동시 수정 시 하나만 성공·나머지 409·제목과 크레딧이 섞이지 않음(작품·작가 각 20회), 중간 실패 시 전부 롤백, 작품·작가 잠금이 별점 작성·크레딧 추가를 막지 않음 (#38) | O |
+| `WorkCreatorVersionMigrationTest` | V6 적용·기본값 0·CHECK, V5 데이터에 V6 적용 시 ID·별점·리뷰·제목 보존 (#38) | O |
 | `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |
 | `SessionCookieHttpTest`, `LocalSessionCookieHttpTest` | 실제 HTTP 응답의 쿠키 속성(`__Host-`, local), 세션 흐름, ERROR 디스패치, loopback 바인딩 | O |
 | `CreatorApiIntegrationTest`, `WorkApiIntegrationTest` | 등록·조회 API 전체 흐름, 입력 오류, 정렬·페이징 | O |
@@ -345,10 +348,15 @@ npm run build
 
 - 내 리뷰 POST·PUT·DELETE 와 내 별점 PUT·DELETE 는 헤더 `X-Expected-User-Id`(화면을 렌더링한 사용자 ID, 십진수 문자열)가 필수입니다. 이 요청의 로그인 사용자와 다르면 409 `USER_MISMATCH` 로 아무것도 바꾸지 않습니다(계정 전환 중 다른 계정에 반영되는 것을 막음). 작성자·별점 소유자는 항상 세션 사용자입니다. 값은 일치 확인에만 씁니다.
 | POST | `/api/v1/admin/works` | 작품 등록 (ADMIN) |
+| GET | `/api/v1/admin/works/{workId}` | 관리자용 작품 상세: 공개 상세 + `version` (ADMIN) |
+| PUT | `/api/v1/admin/works/{workId}` | 작품 핵심 정보 전체 교체 `{"version", "workFormat", "originCountry", "description", "titles", "creators"}` (ADMIN, 불일치 409 `WORK_VERSION_CONFLICT`) |
 | POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN) |
+| GET | `/api/v1/admin/creators/{creatorId}` | 관리자용 작가 상세: `version`, `linkedWorkCount` (ADMIN) |
+| PUT | `/api/v1/admin/creators/{creatorId}` | 작가 이름 전체 교체 `{"version", "name", "originalName"}` (ADMIN, 불일치 409 `CREATOR_VERSION_CONFLICT`) |
 
 - 페이지: `page` 0부터(기본 0), `size` 1~100(기본 20), `sort`는 `createdAt` 또는 `id`에 `,asc`/`,desc` (기본 `createdAt,desc` + `id,desc`). 범위 밖 값이나 허용하지 않은 정렬은 400입니다. `page × size`(offset)는 2,147,483,647 이하만 지원하며, 넘으면 `page` 필드 오류(400)입니다(예: `size=100`이면 `page` 최대 21474836).
 - 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md), 별점은 [docs/rating-design-draft.md](docs/rating-design-draft.md), 리뷰는 [docs/review-design-draft.md](docs/review-design-draft.md)를 참고하세요.
+- 관리자 수정(PUT)은 GET 으로 받은 `version` 을 그대로 보내야 합니다. 다르면 409 이고 `error.currentVersion` 에 현재 값이 담기며 아무것도 바뀌지 않습니다. 같은 `version` 으로 보낸 내용이 현재와 같으면 `version` 이 오르지 않습니다. 성공한 수정을 이전 `version` 으로 다시 보내면 409 입니다. 제목·크레딧은 한 트랜잭션에서 통째로 바뀌고, 작품·작가 ID와 별점·리뷰는 그대로입니다. 삭제 API 는 없습니다. 규칙은 [docs/work-platform-admin-spec.md](docs/work-platform-admin-spec.md) §5.1·§5.2를 참고하세요.
 - 작품 목록·상세 응답에는 `rating: { average, count }`가 있습니다. `average`는 소수 첫째 자리(HALF_UP)이고 별점이 없으면 `null`입니다.
 - POST 등 변경 요청은 `XSRF-TOKEN` 쿠키 값을 `X-XSRF-TOKEN` 헤더로 보내야 합니다. 공개 GET(작품·작가·health) 외의 경로는 로그인이 필요합니다.
 

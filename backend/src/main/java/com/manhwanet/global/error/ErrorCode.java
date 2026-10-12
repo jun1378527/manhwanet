@@ -27,9 +27,13 @@ public enum ErrorCode {
 
     // work
     WORK_NOT_FOUND(HttpStatus.NOT_FOUND, "작품을 찾을 수 없습니다."),
+    /** 관리자 수정 요청의 version 이 현재 작품 version 과 다름. 아무것도 바꾸지 않는다 */
+    WORK_VERSION_CONFLICT(HttpStatus.CONFLICT, "작품이 다른 곳에서 수정되었습니다. 최신 내용을 다시 불러온 뒤 수정해 주세요."),
 
     // creator
     CREATOR_NOT_FOUND(HttpStatus.NOT_FOUND, "작가를 찾을 수 없습니다."),
+    /** 관리자 수정 요청의 version 이 현재 작가 version 과 다름. 아무것도 바꾸지 않는다 */
+    CREATOR_VERSION_CONFLICT(HttpStatus.CONFLICT, "작가 정보가 다른 곳에서 수정되었습니다. 최신 내용을 다시 불러온 뒤 수정해 주세요."),
 
     // review
     REVIEW_NOT_FOUND(HttpStatus.NOT_FOUND, "리뷰를 찾을 수 없습니다."),

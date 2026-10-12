@@ -6,6 +6,7 @@ import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ConstraintViolations;
 import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.error.InvalidInputException;
+import com.manhwanet.global.error.VersionConflictException;
 import com.manhwanet.global.response.ApiError;
 import com.manhwanet.global.response.PageResponse;
 import com.manhwanet.work.domain.CountryCodes;
@@ -19,13 +20,17 @@ import com.manhwanet.work.domain.WorkCreatorRepository;
 import com.manhwanet.work.domain.WorkCreditDraft;
 import com.manhwanet.work.domain.WorkFormat;
 import com.manhwanet.work.domain.WorkRepository;
+import com.manhwanet.work.domain.WorkRepository.LockedWork;
 import com.manhwanet.work.domain.WorkTitle;
 import com.manhwanet.work.domain.WorkTitleDraft;
 import com.manhwanet.work.domain.WorkTitleRepository;
+import com.manhwanet.review.dto.JsonInteger;
+import com.manhwanet.work.dto.AdminWorkDetailResponse;
 import com.manhwanet.work.dto.CreateWorkRequest;
 import com.manhwanet.work.dto.CreditResponse;
 import com.manhwanet.work.dto.PrimaryTitleResponse;
 import com.manhwanet.work.dto.RatingSummaryResponse;
+import com.manhwanet.work.dto.UpdateWorkRequest;
 import com.manhwanet.work.dto.WorkDetailResponse;
 import com.manhwanet.work.dto.WorkSummaryResponse;
 import com.manhwanet.work.dto.WorkTitleResponse;
@@ -34,6 +39,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -43,6 +49,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -100,12 +107,95 @@ public class WorkService {
         return toDetail(work, RatingSummaryResponse.EMPTY);
     }
 
+    /**
+     * 공개 상세. 작품·제목과 크레딧을 서로 다른 SQL 로 읽으므로, 그 사이에 관리자 수정이 커밋돼도
+     * 한 응답에 이전·이후 값이 섞이지 않도록 REPEATABLE READ 스냅샷 하나로 읽는다(읽기 전용이라 직렬화 실패 없음).
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public WorkDetailResponse getWork(Long workId) {
         Work work = workRepository.findWithTitlesById(workId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.WORK_NOT_FOUND));
         RatingSummaryResponse rating = ratingSummaryQuery.findByWorkIds(List.of(work.getId()))
                 .getOrDefault(work.getId(), RatingSummaryResponse.EMPTY);
         return toDetail(work, rating);
+    }
+
+    /** 관리자용 상세: 공개 상세 + 수정용 version. 공개 상세와 같은 이유로 스냅샷 하나로 읽는다. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public AdminWorkDetailResponse getAdminWork(Long workId) {
+        Work work = workRepository.findWithTitlesById(workId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WORK_NOT_FOUND));
+        RatingSummaryResponse rating = ratingSummaryQuery.findByWorkIds(List.of(work.getId()))
+                .getOrDefault(work.getId(), RatingSummaryResponse.EMPTY);
+        return AdminWorkDetailResponse.of(work.getVersion(), toDetail(work, rating));
+    }
+
+    /**
+     * 핵심 정보 수정(전체 교체). docs/work-platform-admin-spec.md §5.1.
+     * <ol>
+     *   <li>입력 검증(400). 규칙은 등록과 같다.</li>
+     *   <li>작품 행 잠금(없으면 404). 같은 작품의 다른 수정은 커밋까지 기다린다.</li>
+     *   <li>version 비교(다르면 409 WORK_VERSION_CONFLICT, 아무것도 바꾸지 않음).</li>
+     *   <li>내용이 같으면 version·updated_at 을 바꾸지 않고 현재 값을 돌려준다(멱등).</li>
+     *   <li>제목·크레딧 행을 지우고 다시 넣은 뒤 핵심 필드와 version 을 조건부 UPDATE 한다.
+     *       모두 한 트랜잭션이므로 중간에 실패하면 전부 되돌아간다(대표 제목·크레딧 원자적 교체).</li>
+     * </ol>
+     * 작품 ID는 바뀌지 않는다. 별점·리뷰는 작품 ID에만 묶여 있어 영향을 받지 않는다.
+     */
+    @Transactional
+    public AdminWorkDetailResponse update(Long workId, UpdateWorkRequest request) {
+        List<ApiError.FieldError> errors = new ArrayList<>();
+        Long version = version(request.version(), errors);
+        WorkFormat workFormat = WorkFormat.valueOf(request.workFormat());
+        String originCountry = normalizeOriginCountry(request.originCountry(), errors);
+        String description = normalizeDescription(request.description(), errors);
+        List<WorkTitleDraft> titles = normalizeTitles(request.titles(), errors);
+        List<WorkCreditDraft> credits = normalizeCredits(request.creators(), errors);
+        if (!errors.isEmpty()) {
+            throw new InvalidInputException(errors);
+        }
+        Work.validateReplacement(titles, credits);
+
+        LockedWork current = workRepository.lockById(workId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WORK_NOT_FOUND));
+        if (!current.getVersion().equals(version)) {
+            throw new VersionConflictException(ErrorCode.WORK_VERSION_CONFLICT, current.getVersion());
+        }
+
+        boolean coreChanged = !current.getWorkFormat().equals(workFormat.name())
+                || !Objects.equals(current.getOriginCountry(), originCountry)
+                || !Objects.equals(current.getDescription(), description);
+        boolean titlesChanged = !Set.copyOf(workTitleRepository.findDrafts(workId)).equals(Set.copyOf(titles));
+        boolean creditsChanged = !Set.copyOf(workCreatorRepository.findDrafts(workId)).equals(Set.copyOf(credits));
+        if (!coreChanged && !titlesChanged && !creditsChanged) {
+            return getAdminWork(workId);
+        }
+
+        try {
+            if (titlesChanged) {
+                workTitleRepository.deleteByWorkId(workId);
+                for (WorkTitleDraft title : titles) {
+                    workTitleRepository.insertTitle(workId, title.title(), title.languageCode(), title.primary());
+                }
+            }
+            if (creditsChanged) {
+                workCreatorRepository.deleteByWorkId(workId);
+                for (WorkCreditDraft credit : credits) {
+                    workCreatorRepository.insertCredit(workId, credit.creatorId(), credit.role().name());
+                }
+            }
+        } catch (DataIntegrityViolationException e) {
+            if (ConstraintViolations.isOneOf(e, DUPLICATE_CONSTRAINTS)) {
+                log.debug("Duplicate constraint violated: {}", ConstraintViolations.constraintName(e).orElse(""));
+                throw new BusinessException(ErrorCode.DUPLICATE_RESOURCE);
+            }
+            throw e;
+        }
+        int updated = workRepository.updateCore(workId, version, workFormat.name(), originCountry, description);
+        if (updated != 1) {
+            throw new IllegalStateException("locked work was not updated: " + workId);
+        }
+        return getAdminWork(workId);
     }
 
     /** 작품 존재 여부. 다른 도메인(rating)이 작품 ID를 검증할 때 사용한다. */
@@ -118,6 +208,7 @@ public class WorkService {
      * 작품 페이지 조회 후 대표 제목·크레딧·작가·별점 집계를 페이지 단위로 일괄 조회한다.
      * 빈 페이지는 연관 조회와 집계를 모두 생략한다.
      */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResponse<WorkSummaryResponse> getWorks(Pageable pageable) {
         Page<Work> page = workRepository.findAll(pageable);
         if (page.isEmpty()) {
@@ -210,6 +301,21 @@ public class WorkService {
     }
 
     // ---------- 입력 정규화·검증 (docs/work-creator-spec.md 3, 4) ----------
+
+    static final String VERSION_REQUIRED = "version 은 필수입니다.";
+    static final String VERSION_INVALID = "version 은 0 이상의 정수여야 합니다.";
+
+    private static Long version(JsonInteger field, List<ApiError.FieldError> errors) {
+        if (field == null) {
+            errors.add(new ApiError.FieldError("version", VERSION_REQUIRED));
+            return null;
+        }
+        if (!field.isInteger() || field.value() < 0) {
+            errors.add(new ApiError.FieldError("version", VERSION_INVALID));
+            return null;
+        }
+        return field.value();
+    }
 
     private static String normalizeOriginCountry(String raw, List<ApiError.FieldError> errors) {
         if (raw == null) {

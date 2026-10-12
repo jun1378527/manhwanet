@@ -9,3 +9,4 @@
 - [review-design-draft.md](review-design-draft.md) — 작품 리뷰 **확정 명세** (작성 정책·본문 규칙·데이터 모델·API·수정·삭제 충돌·목록·테스트). 백엔드 #19, 화면 #21 구현
 - [login-limit-design-draft.md](login-limit-design-draft.md) — 로그인 보호 **확정 명세** (#10: 계정별 제한·용량·전역 해시 게이트·429/503·Retry-After·검증 계획. 잠정 수치 포함). 구현 #28
 - [ui-design-draft.md](ui-design-draft.md) — UI 디자인 방향 **초안** (방향 A·B, 화면 시안, 공통 규칙, 디자인만/데이터·API 필요 구분). 시안 파일: [ui-mockups/manhwanet-ui-mockups.html](ui-mockups/manhwanet-ui-mockups.html)
+- [work-platform-admin-spec.md](work-platform-admin-spec.md) — 작품·플랫폼 관리 구현 명세 **초안** (#37: ADMIN 수정·동시 수정 충돌(#38 구현), 플랫폼 연결·상태 이력, 외부 ID·근거, 중복 검수, 파일럿, 이슈 #38~#44). V7·V8은 후속 설계이며 #38 구현에 포함되지 않았습니다.
