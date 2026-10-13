@@ -44,6 +44,15 @@ public class GlobalExceptionHandler {
                         e.getErrorCode(), e.getMessage(), e.getCurrentVersion())));
     }
 
+    /** 플랫폼 작품 중복 연결(409). 기존 작품·연결 ID 를 함께 보낸다(관리자 API 에서만 발생). */
+    @ExceptionHandler(ListingAlreadyLinkedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleListingAlreadyLinked(ListingAlreadyLinkedException e) {
+        return ResponseEntity
+                .status(e.getErrorCode().getStatus())
+                .body(ApiResponse.failure(ApiError.alreadyLinked(
+                        e.getErrorCode(), e.getMessage(), e.getExistingWorkId(), e.getExistingListingId())));
+    }
+
     /** 요청 제한(429)·일시적 과부하(503). Retry-After 헤더를 함께 보낸다. */
     @ExceptionHandler(RetryLaterException.class)
     public ResponseEntity<ApiResponse<Void>> handleRetryLater(RetryLaterException e) {

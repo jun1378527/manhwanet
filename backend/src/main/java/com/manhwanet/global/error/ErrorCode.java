@@ -30,6 +30,14 @@ public enum ErrorCode {
     /** 관리자 수정 요청의 version 이 현재 작품 version 과 다름. 아무것도 바꾸지 않는다 */
     WORK_VERSION_CONFLICT(HttpStatus.CONFLICT, "작품이 다른 곳에서 수정되었습니다. 최신 내용을 다시 불러온 뒤 수정해 주세요."),
 
+    // platform (#39)
+    PLATFORM_NOT_FOUND(HttpStatus.NOT_FOUND, "플랫폼을 찾을 수 없습니다."),
+    /** 관리자 수정 요청의 version 이 현재 플랫폼 version 과 다름. 아무것도 바꾸지 않는다 */
+    PLATFORM_VERSION_CONFLICT(HttpStatus.CONFLICT, "플랫폼 정보가 다른 곳에서 수정되었습니다. 최신 내용을 다시 불러온 뒤 수정해 주세요."),
+    LISTING_NOT_FOUND(HttpStatus.NOT_FOUND, "플랫폼 연결을 찾을 수 없습니다."),
+    /** 같은 플랫폼의 같은 외부 작품 ID 가 이미 (다른 또는 같은) 작품에 연결됨. error.existingWorkId 로 알린다 */
+    PLATFORM_LISTING_ALREADY_LINKED(HttpStatus.CONFLICT, "이 플랫폼 작품은 이미 연결되어 있습니다(error.existingWorkId 확인)."),
+
     // creator
     CREATOR_NOT_FOUND(HttpStatus.NOT_FOUND, "작가를 찾을 수 없습니다."),
     /** 관리자 수정 요청의 version 이 현재 작가 version 과 다름. 아무것도 바꾸지 않는다 */

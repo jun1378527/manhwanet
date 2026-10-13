@@ -235,6 +235,10 @@ cd backend
 | `WorkAdminUpdateApiIntegrationTest` | 작품·작가 관리자 조회·수정: 익명 401·USER 403·CSRF 누락 403, 대표 제목·크레딧 교체, 오래된·미래 version 409(`currentVersion`), 같은 내용은 version 유지, 입력 오류 400, 없는 작품·작가 404, 별점·리뷰·ID 보존 (#38) | O |
 | `WorkAdminConcurrencyTest` | 같은 version 동시 수정 시 하나만 성공·나머지 409·제목과 크레딧이 섞이지 않음(작품·작가 각 20회), 중간 실패 시 전부 롤백, 작품·작가 잠금이 별점 작성·크레딧 추가를 막지 않음 (#38) | O |
 | `WorkCreatorVersionMigrationTest` | V6 적용·기본값 0·CHECK, V5 데이터에 V6 적용 시 ID·별점·리뷰·제목 보존 (#38) | O |
+| `WorkListingApiIntegrationTest` | 작품 플랫폼 연결: 익명 401·USER 403·CSRF 누락 403, 한 작품 여러 플랫폼, 같은 플랫폼·외부 ID 중복 409(`existingWorkId`·`existingListingId`), 다른 플랫폼 같은 번호 허용, URL 스킴·호스트·패턴·정규화·숨은 문자 거절, 큰 ID·입력 오류, 등급 분류·`UNKNOWN`, `CLOSED` 거절·`MERGING` 경고, 종료·이전·이전 체인, 규칙 변경 뒤 종료, 오래된 version 409, 별점·리뷰·ID 보존 (#39) | O |
+| `PlatformAdminApiIntegrationTest` | 플랫폼 10곳 초기값(상태·약관 미입력), ADMIN·CSRF, 보도는 `UNKNOWN`·종료는 `OFFICIAL`만, 통합 대상·자기 참조·순환·`CLOSED` 대상 거절, 근거 URL, 상태·이력 원자성, `activeListingIds`, URL 규칙·호스트 검증과 위험한 패턴 거절 (#39) | O |
+| `WorkListingConcurrencyTest` | 같은 플랫폼 작품을 두 작품에 동시에 연결하면 하나만 성공, 같은 version 동시 등록, 플랫폼 종료와 연결 등록 경쟁, 작품 version 증가 실패 시 연결 롤백 (#39) | O |
+| `PlatformListingMigrationTest`, `AgeRatingClassifierTest`, `PlatformUrlsTest` | V7 FK(CASCADE 없음)·유니크·CHECK·복합 FK, 초기 데이터와 테스트 시드 일치, 등급 분류, URL 정규화·패턴 검사 (#39) | O / X |
 | `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |
 | `SessionCookieHttpTest`, `LocalSessionCookieHttpTest` | 실제 HTTP 응답의 쿠키 속성(`__Host-`, local), 세션 흐름, ERROR 디스패치, loopback 바인딩 | O |
 | `CreatorApiIntegrationTest`, `WorkApiIntegrationTest` | 등록·조회 API 전체 흐름, 입력 오류, 정렬·페이징 | O |
@@ -353,10 +357,19 @@ npm run build
 | POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN) |
 | GET | `/api/v1/admin/creators/{creatorId}` | 관리자용 작가 상세: `version`, `linkedWorkCount` (ADMIN) |
 | PUT | `/api/v1/admin/creators/{creatorId}` | 작가 이름 전체 교체 `{"version", "name", "originalName"}` (ADMIN, 불일치 409 `CREATOR_VERSION_CONFLICT`) |
+| GET | `/api/v1/admin/platforms` | 플랫폼 10곳: 코드·이름·운영 상태와 근거·URL 규칙·허용 호스트·`version` (ADMIN) |
+| GET·PUT | `/api/v1/admin/platforms/{code}` | 플랫폼 조회·URL 규칙 등 전체 교체 (ADMIN, 불일치 409 `PLATFORM_VERSION_CONFLICT`) |
+| POST | `/api/v1/admin/platforms/{code}/status` | 운영 상태 변경 + 이력 `{"version", "toStatus", "statusBasis", "mergedInto", "effectiveOn", "evidenceUrl", "note"}` (ADMIN) |
+| GET | `/api/v1/admin/platforms/{code}/status-history` | 상태 변경 이력 최신순 (ADMIN) |
+| GET·POST | `/api/v1/admin/works/{workId}/listings` | 작품 플랫폼 연결 목록·등록 (ADMIN, 작품 `version` 사용, 중복 409 `PLATFORM_LISTING_ALREADY_LINKED`) |
+| PUT | `/api/v1/admin/works/{workId}/listings/{listingId}` | 연결 수정·종료(`ENDED`)·이전 표시(`MOVED`) (ADMIN) |
+| POST | `/api/v1/admin/works/{workId}/listings/{listingId}/move` | 새 연결 등록 + 기존 연결 `MOVED` 를 한 번에 (ADMIN) |
+| GET | `/api/v1/admin/listings/lookup?platformCode=&platformWorkId=` | 같은 플랫폼 작품이 이미 연결됐는지 확인 (ADMIN) |
 
 - 페이지: `page` 0부터(기본 0), `size` 1~100(기본 20), `sort`는 `createdAt` 또는 `id`에 `,asc`/`,desc` (기본 `createdAt,desc` + `id,desc`). 범위 밖 값이나 허용하지 않은 정렬은 400입니다. `page × size`(offset)는 2,147,483,647 이하만 지원하며, 넘으면 `page` 필드 오류(400)입니다(예: `size=100`이면 `page` 최대 21474836).
 - 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md), 별점은 [docs/rating-design-draft.md](docs/rating-design-draft.md), 리뷰는 [docs/review-design-draft.md](docs/review-design-draft.md)를 참고하세요.
 - 관리자 수정(PUT)은 GET 으로 받은 `version` 을 그대로 보내야 합니다. 다르면 409 이고 `error.currentVersion` 에 현재 값이 담기며 아무것도 바뀌지 않습니다. 같은 `version` 으로 보낸 내용이 현재와 같으면 `version` 이 오르지 않습니다. 성공한 수정을 이전 `version` 으로 다시 보내면 409 입니다. 제목·크레딧은 한 트랜잭션에서 통째로 바뀌고, 작품·작가 ID와 별점·리뷰는 그대로입니다. 삭제 API 는 없습니다. 규칙은 [docs/work-platform-admin-spec.md](docs/work-platform-admin-spec.md) §5.1·§5.2를 참고하세요.
+- 플랫폼 연결(#39)은 작품 `version` 을 함께 올립니다. URL 은 `https`·플랫폼 허용 호스트·작품 URL 패턴으로만 검사하고 서버가 가져오지 않습니다. 제어 문자 인코딩과 중첩된 `.` 경로는 거절합니다. 등급은 원래 표기를 저장하고, 명확한 18세 미만은 `GENERAL`, 명확한 성인 표기(18·19세 이용가, `19금`, 청소년 이용불가, `청불`)는 `ADULT`, 모호하거나 확인하지 못한 표기는 `UNKNOWN`입니다. `UNKNOWN` 은 일반으로 올리지 않고, 인식하지 못한 표기를 `ADULT` 로 지정하려면 사유 메모가 필요합니다. 연결·플랫폼 삭제 API 는 없고 상태로만 바꿉니다. 연결 정보는 아직 공개 API 에 나오지 않습니다(#42). 규칙은 [docs/work-platform-admin-spec.md](docs/work-platform-admin-spec.md) §3.2 구현 기록을 참고하세요.
 - 작품 목록·상세 응답에는 `rating: { average, count }`가 있습니다. `average`는 소수 첫째 자리(HALF_UP)이고 별점이 없으면 `null`입니다.
 - POST 등 변경 요청은 `XSRF-TOKEN` 쿠키 값을 `X-XSRF-TOKEN` 헤더로 보내야 합니다. 공개 GET(작품·작가·health) 외의 경로는 로그인이 필요합니다.
 

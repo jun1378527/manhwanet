@@ -44,6 +44,19 @@ public interface WorkRepository extends JpaRepository<Work, Long> {
             @Param("workFormat") String workFormat, @Param("originCountry") String originCountry,
             @Param("description") String description);
 
+    /**
+     * 작품 하위 리소스(플랫폼 연결 등) 변경 시 작품 version 만 올린다(명세 S-3: 작품당 버전 하나).
+     * 잠금으로 확인한 뒤 호출하므로 정상 흐름에서는 항상 1을 돌려준다.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE works
+            SET version = version + 1,
+                updated_at = GREATEST(updated_at, now())
+            WHERE id = :id AND version = :expectedVersion
+            """, nativeQuery = true)
+    int bumpVersion(@Param("id") Long id, @Param("expectedVersion") long expectedVersion);
+
     interface LockedWork {
         Long getId();
 
