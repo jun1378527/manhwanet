@@ -41,7 +41,7 @@ class CreatorApiIntegrationTest {
     @BeforeEach
     void setUp() {
         TestDatabaseCleaner.clean(jdbcTemplate, environment);
-        fixtures = new ApiFixtures(mockMvc, objectMapper);
+        fixtures = new ApiFixtures(mockMvc, objectMapper, jdbcTemplate);
     }
 
     @Test

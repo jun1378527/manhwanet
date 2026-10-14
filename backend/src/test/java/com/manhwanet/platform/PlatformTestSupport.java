@@ -57,7 +57,17 @@ final class PlatformTestSupport {
         body.put("listingKind", "MAIN");
         body.put("languageCode", "ko");
         body.put("verifiedAt", VERIFIED_AT);
+        body.put("evidence", List.of(listingEvidence(url)));
         return body;
+    }
+
+    /** 연결 근거(#40): 사람이 플랫폼 작품 페이지를 확인함 */
+    static Map<String, Object> listingEvidence(String url) {
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("sourceType", "PLATFORM_PAGE_MANUAL");
+        evidence.put("sourceRef", url);
+        evidence.put("verifiedAt", VERIFIED_AT);
+        return evidence;
     }
 
     static Map<String, Object> kakaoPage(long version, String id) {

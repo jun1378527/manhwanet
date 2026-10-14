@@ -386,6 +386,7 @@ class PlatformAdminApiIntegrationTest {
         body.put("defaultIdScope", "UNKNOWN");
         body.put("urlRuleBasis", "UNVERIFIED");
         body.put("allowedHosts", List.of("toomics.com"));
+        body.put("reason", "URL 규칙 확인");
         return body;
     }
 
@@ -394,6 +395,7 @@ class PlatformAdminApiIntegrationTest {
         body.put("version", version);
         body.put("toStatus", toStatus);
         body.put("statusBasis", basis);
+        body.put("reason", "운영 상태 확인");
         return body;
     }
 

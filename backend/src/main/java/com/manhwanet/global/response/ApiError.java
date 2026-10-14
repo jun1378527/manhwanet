@@ -9,27 +9,34 @@ import java.util.List;
  * <ul>
  *   <li>currentVersion: 버전 충돌(409)의 현재 버전</li>
  *   <li>existingWorkId·existingListingId: 플랫폼 작품 중복 연결(409 PLATFORM_LISTING_ALREADY_LINKED, 관리자 API 만)</li>
+ *   <li>existingWorkId 또는 existingCreatorId·existingExternalIdId: 외부 ID 중복 연결(409 EXTERNAL_ID_ALREADY_LINKED, #40)</li>
  * </ul>
  */
 @JsonInclude(JsonInclude.Include.NON_EMPTY)
 public record ApiError(String code, String message, List<FieldError> fieldErrors, Long currentVersion,
-        Long existingWorkId, Long existingListingId) {
+        Long existingWorkId, Long existingListingId, Long existingCreatorId, Long existingExternalIdId) {
 
     public ApiError {
         fieldErrors = fieldErrors == null ? List.of() : List.copyOf(fieldErrors);
     }
 
     public static ApiError of(ErrorCode errorCode, String message, List<FieldError> fieldErrors) {
-        return new ApiError(errorCode.name(), message, fieldErrors, null, null, null);
+        return new ApiError(errorCode.name(), message, fieldErrors, null, null, null, null, null);
     }
 
     public static ApiError versionConflict(ErrorCode errorCode, String message, long currentVersion) {
-        return new ApiError(errorCode.name(), message, List.of(), currentVersion, null, null);
+        return new ApiError(errorCode.name(), message, List.of(), currentVersion, null, null, null, null);
     }
 
     public static ApiError alreadyLinked(ErrorCode errorCode, String message, long existingWorkId,
             long existingListingId) {
-        return new ApiError(errorCode.name(), message, List.of(), null, existingWorkId, existingListingId);
+        return new ApiError(errorCode.name(), message, List.of(), null, existingWorkId, existingListingId, null, null);
+    }
+
+    public static ApiError externalIdLinked(ErrorCode errorCode, String message, Long existingWorkId,
+            Long existingCreatorId, long existingExternalIdId) {
+        return new ApiError(errorCode.name(), message, List.of(), null, existingWorkId, null, existingCreatorId,
+                existingExternalIdId);
     }
 
     public record FieldError(String field, String reason) {

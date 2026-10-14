@@ -1,6 +1,7 @@
 package com.manhwanet.platform.api;
 
 import com.manhwanet.auth.application.AuthenticatedUser;
+import com.manhwanet.global.admin.AdminPrincipal;
 import com.manhwanet.global.response.ApiResponse;
 import com.manhwanet.platform.application.WorkListingService;
 import com.manhwanet.platform.dto.CreateListingRequest;

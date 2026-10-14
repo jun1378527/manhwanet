@@ -1,5 +1,6 @@
 package com.manhwanet.work.dto;
 
+import com.manhwanet.provenance.dto.EvidenceRequest;
 import com.manhwanet.review.dto.JsonInteger;
 import com.manhwanet.work.dto.CreateWorkRequest.CreditRequest;
 import com.manhwanet.work.dto.CreateWorkRequest.TitleRequest;
@@ -14,6 +15,8 @@ import java.util.List;
  * version 이 현재 작품 version 과 같을 때만 반영한다. 나머지 필드의 규칙은 등록(CreateWorkRequest)과 같다.
  * description 을 생략하거나 null 로 보내면 줄거리를 비운다(전체 교체).
  * version 은 JSON 정수만 받는다(문자열·소수 표기는 400).
+ * #40: reason(수정 사유) 필수. 실제로 바뀐 제목·크레딧에는 TITLE·CREDIT 근거, 바뀐 줄거리(비우는 경우 제외)에는
+ * DESCRIPTION(STAFF·LICENSED) 근거가 필요하다. 바뀐 것이 없으면 근거·기록을 남기지 않는다.
  */
 public record UpdateWorkRequest(
         JsonInteger version,
@@ -32,5 +35,9 @@ public record UpdateWorkRequest(
 
         @NotNull(message = "작가 연결은 1개 이상 필요합니다.")
         @Size(min = 1, max = 20, message = "작가 연결은 1개 이상 20개 이하여야 합니다.")
-        List<@NotNull(message = "작가 연결 항목은 비어 있을 수 없습니다.") @Valid CreditRequest> creators) {
+        List<@NotNull(message = "작가 연결 항목은 비어 있을 수 없습니다.") @Valid CreditRequest> creators,
+
+        List<EvidenceRequest> evidence,
+
+        String reason) {
 }

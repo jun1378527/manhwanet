@@ -382,6 +382,7 @@ class WorkListingApiIntegrationTest {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("version", 1);
         body.put("newListing", newListing);
+        body.put("reason", "슬러그 변경으로 이전");
 
         MvcResult moved = admin.postJson(listingPath(workId, old) + "/move", body);
         assertThat(moved.getResponse().getStatus()).isEqualTo(201);
@@ -424,6 +425,8 @@ class WorkListingApiIntegrationTest {
         // 작품 수정(#38) 화면이 version 0 을 들고 있으면 연결 추가 뒤 409 가 난다(작품당 버전 하나)
         Map<String, Object> workEdit = new LinkedHashMap<>();
         workEdit.put("version", 0);
+        workEdit.put("reason", "제목 수정");
+        workEdit.put("evidence", List.of(Map.of("field", "TITLE", "sourceType", "STAFF", "verifiedAt", "2026-10-12T00:00:00Z")));
         workEdit.put("workFormat", "WEBTOON");
         workEdit.put("titles", List.of(Map.of("title", "새 제목", "languageCode", "ko", "primary", true)));
         long creatorId = jdbc.queryForObject("SELECT creator_id FROM work_creators WHERE work_id = ?", Long.class, workId);
@@ -535,6 +538,7 @@ class WorkListingApiIntegrationTest {
         body.put("listingKind", "MAIN");
         body.put("languageCode", "ko");
         body.put("status", status);
+        body.put("reason", "연결 상태 확인");
         return body;
     }
 

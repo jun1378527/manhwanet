@@ -1,6 +1,7 @@
 package com.manhwanet.platform.api;
 
 import com.manhwanet.auth.application.AuthenticatedUser;
+import com.manhwanet.global.admin.AdminPrincipal;
 import com.manhwanet.global.response.ApiResponse;
 import com.manhwanet.platform.application.PlatformAdminService;
 import com.manhwanet.platform.dto.ChangePlatformStatusRequest;
@@ -50,8 +51,9 @@ public class PlatformAdminController {
     }
 
     @PutMapping("/{code}")
-    public ApiResponse<PlatformResponse> update(@PathVariable String code, @RequestBody UpdatePlatformRequest request) {
-        return ApiResponse.success(platformAdminService.updateRules(code, request));
+    public ApiResponse<PlatformResponse> update(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable String code, @RequestBody UpdatePlatformRequest request) {
+        return ApiResponse.success(platformAdminService.updateRules(code, request, AdminPrincipal.id(principal)));
     }
 
     @PostMapping("/{code}/status")

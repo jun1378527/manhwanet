@@ -93,7 +93,11 @@ public final class PlatformUrls {
             return Result.fail("url", "URL에 호스트가 없습니다.");
         }
         host = host.toLowerCase(Locale.ROOT);
-        if (!allowedHosts.contains(host)) {
+        if (allowedHosts == null) {
+            if (!isValidHost(host)) {
+                return Result.fail("url", "도메인 이름 형식의 호스트만 허용합니다(IP 주소·localhost 불가): " + host);
+            }
+        } else if (!allowedHosts.contains(host)) {
             return Result.fail("url", "이 플랫폼에서 허용하지 않은 호스트입니다: " + host);
         }
         String path = normalizeEscapes(ascii(uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath()));
@@ -127,6 +131,25 @@ public final class PlatformUrls {
             }
         }
         return new Result(normalized, null, null);
+    }
+
+    /**
+     * 플랫폼이 아닌 https URL(공식 링크·근거·외부 ID 출처) 검사와 정규화 (#40).
+     * 플랫폼 URL 과 같은 규칙(https·사용자 정보·포트·조각·숨은 문자·점 경로·인코딩)을 쓰되, 호스트는 목록 대신
+     * 도메인 이름 형식만 확인한다. 서버는 이 URL 을 가져오지 않는다.
+     */
+    public static Result validateGeneral(String rawUrl) {
+        return validate(rawUrl, null, null, null);
+    }
+
+    /** 정규화된 URL 의 호스트(소문자). 형식이 틀리면 null */
+    public static String hostOf(String normalizedUrl) {
+        try {
+            String host = new URI(normalizedUrl).getHost();
+            return host == null ? null : host.toLowerCase(Locale.ROOT);
+        } catch (URISyntaxException e) {
+            return null;
+        }
     }
 
     /** 관리자가 입력한 작품 URL 패턴 검사. 문제가 없으면 null, 있으면 사유 */

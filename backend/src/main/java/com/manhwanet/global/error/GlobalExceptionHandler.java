@@ -53,6 +53,15 @@ public class GlobalExceptionHandler {
                         e.getErrorCode(), e.getMessage(), e.getExistingWorkId(), e.getExistingListingId())));
     }
 
+    /** 외부 ID 중복 연결(409). 기존 작품 또는 작가와 외부 ID 행 ID 를 함께 보낸다(#40, 관리자 API 에서만 발생). */
+    @ExceptionHandler(ExternalIdAlreadyLinkedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleExternalIdLinked(ExternalIdAlreadyLinkedException e) {
+        return ResponseEntity
+                .status(e.getErrorCode().getStatus())
+                .body(ApiResponse.failure(ApiError.externalIdLinked(e.getErrorCode(), e.getMessage(),
+                        e.getExistingWorkId(), e.getExistingCreatorId(), e.getExistingExternalIdId())));
+    }
+
     /** 요청 제한(429)·일시적 과부하(503). Retry-After 헤더를 함께 보낸다. */
     @ExceptionHandler(RetryLaterException.class)
     public ResponseEntity<ApiResponse<Void>> handleRetryLater(RetryLaterException e) {

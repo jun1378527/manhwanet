@@ -25,7 +25,8 @@ public final class TestDatabaseCleaner {
         String testDbName = TestDatabaseNames.configuredTestDatabaseName(environment);
         requireCurrentDatabase(jdbcTemplate, testDbName);
         jdbcTemplate.execute("""
-                TRUNCATE TABLE work_reviews, work_ratings, work_creators, work_titles, works, creators, users,
+                TRUNCATE TABLE admin_change_log, work_field_sources, work_links, work_external_ids, creator_external_ids,
+                               work_reviews, work_ratings, work_creators, work_titles, works, creators, users,
                                work_platform_listings, platform_status_history, platform_hosts, platforms
                 RESTART IDENTITY CASCADE
                 """);

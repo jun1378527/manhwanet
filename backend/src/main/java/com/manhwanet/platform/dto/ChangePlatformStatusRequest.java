@@ -6,6 +6,7 @@ import java.time.LocalDate;
 /**
  * 플랫폼 운영 상태 변경. POST /api/v1/admin/platforms/{code}/status
  * 변경과 이력 저장은 한 트랜잭션이다. evidenceUrl 은 저장만 하고 서버가 가져오지 않는다.
+ * note 는 상태 이력에 남는 메모, reason 은 관리 변경 기록의 사유(필수, #40)다.
  */
 public record ChangePlatformStatusRequest(
         JsonInteger version,
@@ -14,5 +15,6 @@ public record ChangePlatformStatusRequest(
         String mergedInto,
         LocalDate effectiveOn,
         String evidenceUrl,
-        String note) {
+        String note,
+        String reason) {
 }

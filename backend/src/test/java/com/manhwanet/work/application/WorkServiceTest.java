@@ -6,15 +6,22 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
+import com.manhwanet.audit.application.AdminChangeLog;
 import com.manhwanet.creator.application.CreatorService;
 import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ErrorCode;
+import com.manhwanet.platform.application.WorkListingService;
+import com.manhwanet.platform.domain.ListingRepository;
+import com.manhwanet.provenance.application.ProvenanceQuery;
+import com.manhwanet.provenance.application.ProvenanceWriter;
+import com.manhwanet.provenance.dto.EvidenceRequest;
 import com.manhwanet.work.domain.Work;
 import com.manhwanet.work.domain.WorkCreatorRepository;
 import com.manhwanet.work.domain.WorkRepository;
 import com.manhwanet.work.domain.WorkTitleRepository;
 import com.manhwanet.work.dto.CreateWorkRequest;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import org.hibernate.exception.ConstraintViolationException;
@@ -33,12 +40,19 @@ class WorkServiceTest {
     private final CreatorService creatorService = mock(CreatorService.class);
     private final WorkService workService = new WorkService(
             workRepository, mock(WorkTitleRepository.class), mock(WorkCreatorRepository.class), creatorService,
-            mock(WorkRatingSummaryQuery.class));
+            mock(WorkRatingSummaryQuery.class), mock(WorkListingService.class), mock(ListingRepository.class),
+            mock(ProvenanceWriter.class), mock(ProvenanceQuery.class), mock(AdminChangeLog.class));
 
     private final CreateWorkRequest request = new CreateWorkRequest(
             "WEBTOON", null, null,
             List.of(new CreateWorkRequest.TitleRequest("달빛 기사단", "ko", true)),
-            List.of(new CreateWorkRequest.CreditRequest(1L, "STORY")));
+            List.of(new CreateWorkRequest.CreditRequest(1L, "STORY")),
+            null, null, null,
+            List.of(evidence("TITLE"), evidence("CREDIT")), null);
+
+    private static EvidenceRequest evidence(String field) {
+        return new EvidenceRequest(field, null, null, "STAFF", null, null, Instant.parse("2026-10-12T00:00:00Z"), null);
+    }
 
     @BeforeEach
     void setUp() {
@@ -53,7 +67,7 @@ class WorkServiceTest {
     void expectedDuplicateConstraintBecomesConflict(String constraintName) {
         given(workRepository.saveAndFlush(any(Work.class))).willThrow(violation(constraintName));
 
-        assertThatThrownBy(() -> workService.register(request))
+        assertThatThrownBy(() -> workService.register(request, 1L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.DUPLICATE_RESOURCE);
@@ -64,7 +78,7 @@ class WorkServiceTest {
         DataIntegrityViolationException original = violation("fk_work_creators_creator");
         given(workRepository.saveAndFlush(any(Work.class))).willThrow(original);
 
-        assertThatThrownBy(() -> workService.register(request)).isSameAs(original);
+        assertThatThrownBy(() -> workService.register(request, 1L)).isSameAs(original);
     }
 
     @Test
@@ -72,7 +86,7 @@ class WorkServiceTest {
         DataIntegrityViolationException original = new DataIntegrityViolationException("unknown");
         given(workRepository.saveAndFlush(any(Work.class))).willThrow(original);
 
-        assertThatThrownBy(() -> workService.register(request)).isSameAs(original);
+        assertThatThrownBy(() -> workService.register(request, 1L)).isSameAs(original);
     }
 
     private static DataIntegrityViolationException violation(String constraintName) {

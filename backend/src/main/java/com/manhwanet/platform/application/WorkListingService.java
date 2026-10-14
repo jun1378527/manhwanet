@@ -1,5 +1,9 @@
 package com.manhwanet.platform.application;
 
+import com.manhwanet.audit.application.AdminChangeLog;
+import com.manhwanet.audit.domain.ChangeAction;
+import com.manhwanet.audit.domain.ChangeEntityType;
+import com.manhwanet.global.admin.AdminInputs;
 import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.error.ListingAlreadyLinkedException;
@@ -24,12 +28,17 @@ import com.manhwanet.platform.dto.ListingResponse;
 import com.manhwanet.platform.dto.MoveListingRequest;
 import com.manhwanet.platform.dto.UpdateListingRequest;
 import com.manhwanet.platform.dto.WorkListingsResponse;
+import com.manhwanet.provenance.application.Evidence;
+import com.manhwanet.provenance.application.ProvenanceInputs;
+import com.manhwanet.provenance.application.ProvenanceWriter;
+import com.manhwanet.provenance.domain.SourceField;
 import com.manhwanet.work.domain.LanguageTags;
-import com.manhwanet.work.domain.WorkRepository;
 import com.manhwanet.work.domain.WorkRepository.LockedWork;
+import com.manhwanet.work.domain.WorkRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +61,8 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>제목이 같다고 다른 작품의 연결을 합치지 않는다(이 서비스는 작품 ID 로만 연결한다).</li>
  * </ul>
  * 잠금 순서: 플랫폼 행(FOR SHARE, 상태 변경과 직렬화) → 작품 행(FOR NO KEY UPDATE). 같은 작품의 연결 변경은 작품 잠금으로 직렬화된다.
+ * #40: 새 연결은 LISTING 근거가 1개 이상 필요하고, 모든 변경은 같은 트랜잭션에서 관리 변경 기록(LISTING)을 남긴다.
+ * 수정·이전에는 사유(reason)가 필요하다. 내용이 같아 바뀌지 않은 요청은 근거·기록을 남기지 않는다.
  */
 @Service
 @Transactional(readOnly = true)
@@ -61,14 +72,19 @@ public class WorkListingService {
     private final PlatformRepository platformRepository;
     private final WorkRepository workRepository;
     private final NamedParameterJdbcTemplate jdbc;
+    private final ProvenanceWriter provenanceWriter;
+    private final AdminChangeLog changeLog;
     private final Clock clock = Clock.systemUTC();
 
     public WorkListingService(ListingRepository listingRepository, PlatformRepository platformRepository,
-            WorkRepository workRepository, NamedParameterJdbcTemplate jdbc) {
+            WorkRepository workRepository, NamedParameterJdbcTemplate jdbc, ProvenanceWriter provenanceWriter,
+            AdminChangeLog changeLog) {
         this.listingRepository = listingRepository;
         this.platformRepository = platformRepository;
         this.workRepository = workRepository;
         this.jdbc = jdbc;
+        this.provenanceWriter = provenanceWriter;
+        this.changeLog = changeLog;
     }
 
     /** 작품 version 과 연결 목록을 같은 스냅샷에서 읽는다 */
@@ -80,7 +96,7 @@ public class WorkListingService {
     }
 
     public ListingLookupResponse lookup(String platformCode, String platformWorkId) {
-        AdminInputs in = new AdminInputs(new ArrayList<>());
+        AdminInputs in = new AdminInputs();
         String code = in.text(platformCode, "platformCode", 30, true);
         String id = in.text(platformWorkId, "platformWorkId", 100, true);
         in.throwIfAny();
@@ -90,9 +106,10 @@ public class WorkListingService {
 
     @Transactional
     public ListingMutationResponse create(long workId, CreateListingRequest request, long adminId) {
-        AdminInputs in = new AdminInputs(new ArrayList<>());
+        AdminInputs in = new AdminInputs();
         Long version = in.version(request.version());
         NewListing input = newListing(request.toInput(), "", in);
+        String reason = in.reason(request.reason(), false);
         in.throwIfAny();
 
         PlatformRow platform = checkedPlatform(input.platformCode, input.url, input.platformWorkId, "", in);
@@ -103,7 +120,7 @@ public class WorkListingService {
         in.throwIfAny();
         lockWork(workId, version);
 
-        long listingId = insert(workId, input, url, adminId);
+        long listingId = insert(workId, input, url, adminId, reason);
         bump(workId, version);
         return new ListingMutationResponse(workId, version + 1, response(listingId), null,
                 warnings(platform, input.idScope, input.ageClass));
@@ -111,7 +128,7 @@ public class WorkListingService {
 
     @Transactional
     public ListingMutationResponse update(long workId, long listingId, UpdateListingRequest request, long adminId) {
-        AdminInputs in = new AdminInputs(new ArrayList<>());
+        AdminInputs in = new AdminInputs();
         Long version = in.version(request.version());
         String rawUrl = in.text(request.url(), "url", PlatformUrls.URL_MAX_LENGTH, true);
         IdScope idScope = in.enumValue(request.idScope(), IdScope.class, "idScope", true);
@@ -129,6 +146,9 @@ public class WorkListingService {
             in.add("movedToListingId", "이전 대상은 MOVED 상태에서만 지정할 수 있습니다.");
         }
         Instant lastVerifiedAt = in.verifiedAt(request.lastVerifiedAt(), "lastVerifiedAt", false, clock);
+        List<Evidence> evidence = ProvenanceInputs.evidence(request.evidence(), "evidence", in, clock,
+                EnumSet.of(SourceField.LISTING), SourceField.LISTING, false);
+        String reason = in.reason(request.reason(), true);
         in.throwIfAny();
 
         ListingRow before = ownedListing(workId, listingId);
@@ -166,9 +186,14 @@ public class WorkListingService {
         }
         listingRepository.update(listingId, idScope, url, kind, languageCode, status, movedTo, ageRaw, ageClass,
                 verified, verifiedBy, note);
+        changeLog.record(ChangeEntityType.LISTING, String.valueOf(listingId),
+                current.status() == status ? ChangeAction.UPDATE : ChangeAction.STATUS_CHANGE, workId, null,
+                ListingResponse.from(current), response(listingId), reason, adminId);
         if (status == ListingStatus.MOVED) {
-            listingRepository.repointMovedTo(workId, listingId, movedTo);
+            repoint(workId, listingId, movedTo, reason, adminId);
         }
+        provenanceWriter.addEvidence(workId, evidence.stream().map(e -> e.withListing(listingId)).toList(), adminId,
+                reason);
         bump(workId, version);
         return new ListingMutationResponse(workId, version + 1, response(listingId), null,
                 warnings(platform, idScope, ageClass));
@@ -177,13 +202,14 @@ public class WorkListingService {
     /** 새 연결을 만들고 기존 연결을 MOVED(→새 연결)로 바꾼다. 한 트랜잭션, 작품 version 은 1만 오른다 */
     @Transactional
     public ListingMutationResponse move(long workId, long listingId, MoveListingRequest request, long adminId) {
-        AdminInputs in = new AdminInputs(new ArrayList<>());
+        AdminInputs in = new AdminInputs();
         Long version = in.version(request.version());
         if (request.newListing() == null) {
             in.add("newListing", "새 연결(newListing)이 필요합니다.");
             in.throwIfAny();
         }
         NewListing input = newListing(request.newListing(), "newListing.", in);
+        String reason = in.reason(request.reason(), true);
         in.throwIfAny();
 
         ownedListing(workId, listingId);
@@ -200,20 +226,104 @@ public class WorkListingService {
             in.throwIfAny();
         }
 
-        long newId = insert(workId, input, url, adminId);
+        long newId = insert(workId, input, url, adminId, reason);
         listingRepository.update(listingId, current.idScope(), current.url(), current.listingKind(),
                 current.languageCode(), ListingStatus.MOVED, newId, current.ageRatingRaw(), current.ageClass(),
                 current.lastVerifiedAt(), current.verifiedBy(), current.note());
-        listingRepository.repointMovedTo(workId, listingId, newId);
+        changeLog.record(ChangeEntityType.LISTING, String.valueOf(listingId), ChangeAction.MOVE, workId, null,
+                ListingResponse.from(current), response(listingId), reason, adminId);
+        repoint(workId, listingId, newId, reason, adminId);
         bump(workId, version);
         return new ListingMutationResponse(workId, version + 1, response(newId), response(listingId),
                 warnings(platform, input.idScope, input.ageClass));
     }
 
+    // ---------- 작품 등록과 함께 만드는 연결 (#40 §5.6) ----------
+
+    /** 연결과 그 연결의 URL 검증 결과 */
+    public record PreparedListing(NewListing input, PlatformRow checkedPlatform) {
+    }
+
+    /**
+     * 작품 등록 요청의 listings[] 검증(잠금 없음). 형식·URL 규칙·CLOSED·요청 안 중복을 400 으로 모은다.
+     * 등록은 이 검증이 모두 통과한 뒤 작품을 저장하고 insertForNewWork 를 부른다.
+     */
+    public List<PreparedListing> prepareForNewWork(List<ListingInput> inputs, AdminInputs in) {
+        List<PreparedListing> result = new ArrayList<>();
+        if (inputs == null) {
+            return result;
+        }
+        if (inputs.size() > MAX_LISTINGS_ON_CREATE) {
+            in.add("listings", "등록과 함께 넣는 연결은 " + MAX_LISTINGS_ON_CREATE + "개 이하여야 합니다.");
+            return result;
+        }
+        java.util.Set<List<String>> seen = new java.util.HashSet<>();
+        for (int i = 0; i < inputs.size(); i++) {
+            String prefix = "listings[" + i + "].";
+            if (inputs.get(i) == null) {
+                in.add("listings[" + i + "]", "연결 항목은 비어 있을 수 없습니다.");
+                continue;
+            }
+            NewListing input = newListing(inputs.get(i), prefix, in);
+            // 플랫폼·외부 ID·URL 이 형식상 맞으면 다른 필드에 오류가 있어도 URL 규칙까지 함께 검사해 알려 준다
+            if (input.platformCode == null || input.platformWorkId == null || input.url == null
+                    || in.hasError(prefix + "platformWorkId")) {
+                continue;
+            }
+            if (!seen.add(List.of(input.platformCode, input.platformWorkId))) {
+                in.add(prefix + "platformWorkId", "같은 플랫폼·외부 작품 ID 가 요청 안에서 중복되었습니다.");
+                continue;
+            }
+            Optional<PlatformRow> platform = platformRepository.findByCode(input.platformCode);
+            if (platform.isEmpty()) {
+                in.add(prefix + "platformCode", "없는 플랫폼입니다: " + input.platformCode);
+                continue;
+            }
+            checkUrl(input.url, platform.get(), input.platformWorkId, prefix, in);
+            if (platform.get().status() == PlatformStatus.CLOSED) {
+                in.add(prefix + "platformCode", "종료(CLOSED)된 플랫폼에는 새 연결을 만들 수 없습니다.");
+            }
+            result.add(new PreparedListing(input, platform.get()));
+        }
+        return result;
+    }
+
+    /**
+     * 막 저장한(아직 커밋 전) 작품에 연결을 넣는다. 플랫폼을 코드 순으로 공유 잠금한 뒤 잠근 행으로 URL·CLOSED 를 다시 검사한다.
+     * 작품 version 은 올리지 않는다(등록 자체가 version 0 의 첫 상태). 다른 작품에 이미 있으면 409 로 등록 전체가 롤백된다.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void insertForNewWork(long workId, List<PreparedListing> listings, long adminId, String reason) {
+        if (listings.isEmpty()) {
+            return;
+        }
+        Map<String, PlatformRow> locked = new java.util.TreeMap<>();
+        listings.stream().map(p -> p.input().platformCode).sorted().distinct()
+                .forEach(code -> locked.put(code, lockPlatform(code)));
+        AdminInputs in = new AdminInputs();
+        List<String> urls = new ArrayList<>();
+        for (PreparedListing listing : listings) {
+            NewListing input = listing.input();
+            PlatformRow platform = locked.get(input.platformCode);
+            urls.add(checkUrl(input.url, platform, input.platformWorkId, input.prefix, in));
+            if (platform.status() == PlatformStatus.CLOSED) {
+                in.add(input.prefix + "platformCode", "종료(CLOSED)된 플랫폼에는 새 연결을 만들 수 없습니다.");
+            }
+        }
+        in.throwIfAny();
+        for (int i = 0; i < listings.size(); i++) {
+            insert(workId, listings.get(i).input(), urls.get(i), adminId, reason);
+        }
+    }
+
+    static final int MAX_LISTINGS_ON_CREATE = 20;
+
     // ---------- 내부 ----------
 
-    private record NewListing(String platformCode, String platformWorkId, String url, IdScope idScope,
-            ListingKind kind, String languageCode, String ageRaw, AgeClass ageClass, Instant verifiedAt, String note) {
+    /** 검증을 마친 새 연결 입력(작품 등록에서도 쓴다). url 은 아직 정규화 전 값이다 */
+    public record NewListing(String platformCode, String platformWorkId, String url, IdScope idScope,
+            ListingKind kind, String languageCode, String ageRaw, AgeClass ageClass, Instant verifiedAt, String note,
+            List<Evidence> evidence, String prefix) {
     }
 
     private NewListing newListing(ListingInput input, String prefix, AdminInputs in) {
@@ -230,8 +340,13 @@ public class WorkListingService {
         String note = in.text(input.note(), prefix + "note", 500, false);
         AgeClass ageClass = age(ageRaw, input.ageClass(), note, prefix, in);
         Instant verifiedAt = in.verifiedAt(input.verifiedAt(), prefix + "verifiedAt", true, clock);
+        List<Evidence> evidence = ProvenanceInputs.evidence(input.evidence(), prefix + "evidence", in, clock,
+                EnumSet.of(SourceField.LISTING), SourceField.LISTING, false);
+        if (input.evidence() == null || input.evidence().isEmpty()) {
+            in.add(prefix + "evidence", "새 연결에는 근거(evidence, LISTING)가 하나 이상 필요합니다.");
+        }
         return new NewListing(code == null ? null : code.toUpperCase(Locale.ROOT), id, url, scope, kind, language,
-                ageRaw, ageClass, verifiedAt, note);
+                ageRaw, ageClass, verifiedAt, note, evidence, prefix);
     }
 
     /**
@@ -318,7 +433,7 @@ public class WorkListingService {
         }
     }
 
-    private long insert(long workId, NewListing input, String url, long adminId) {
+    private long insert(long workId, NewListing input, String url, long adminId, String reason) {
         Optional<Long> id = listingRepository.insertIfAbsent(workId, input.platformCode, input.platformWorkId,
                 input.idScope, url, input.kind, input.languageCode, input.ageRaw, input.ageClass, input.verifiedAt,
                 adminId, input.note);
@@ -327,7 +442,26 @@ public class WorkListingService {
                     .orElseThrow(() -> new IllegalStateException("conflicting listing not visible"));
             throw new ListingAlreadyLinkedException(existing.workId(), existing.id());
         }
-        return id.get();
+        long listingId = id.get();
+        changeLog.record(ChangeEntityType.LISTING, String.valueOf(listingId), ChangeAction.CREATE, workId, null, null,
+                response(listingId), reason, adminId);
+        provenanceWriter.addEvidence(workId, input.evidence.stream().map(e -> e.withListing(listingId)).toList(),
+                adminId, reason);
+        return listingId;
+    }
+
+    /** 이전 대상 평탄화(연결 → from 을 가리키던 연결이 to 를 가리키게)와 그 연결들의 변경 기록 */
+    private void repoint(long workId, long fromId, long toId, String reason, long adminId) {
+        Map<Long, ListingRow> before = new java.util.HashMap<>();
+        for (ListingRow row : listingRepository.findByWorkId(workId)) {
+            if (Objects.equals(row.movedToListingId(), fromId)) {
+                before.put(row.id(), row);
+            }
+        }
+        for (long id : listingRepository.repointMovedTo(workId, fromId, toId)) {
+            changeLog.record(ChangeEntityType.LISTING, String.valueOf(id), ChangeAction.UPDATE, workId, null,
+                    ListingResponse.from(before.get(id)), response(id), reason, adminId);
+        }
     }
 
     private ListingRow ownedListing(long workId, long listingId) {

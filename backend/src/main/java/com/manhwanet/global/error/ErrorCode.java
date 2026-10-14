@@ -38,6 +38,15 @@ public enum ErrorCode {
     /** 같은 플랫폼의 같은 외부 작품 ID 가 이미 (다른 또는 같은) 작품에 연결됨. error.existingWorkId 로 알린다 */
     PLATFORM_LISTING_ALREADY_LINKED(HttpStatus.CONFLICT, "이 플랫폼 작품은 이미 연결되어 있습니다(error.existingWorkId 확인)."),
 
+    // provenance (#40)
+    /** 같은 출처의 같은 외부 ID 가 이미 (다른 또는 같은) 작품·작가에 연결됨. error.existingWorkId·existingCreatorId 로 알린다 */
+    EXTERNAL_ID_ALREADY_LINKED(HttpStatus.CONFLICT, "이 외부 ID 는 이미 연결되어 있습니다(error.existingWorkId 또는 existingCreatorId 확인)."),
+    EXTERNAL_ID_NOT_FOUND(HttpStatus.NOT_FOUND, "외부 ID 를 찾을 수 없습니다."),
+    WORK_LINK_NOT_FOUND(HttpStatus.NOT_FOUND, "공식 링크를 찾을 수 없습니다."),
+    /** 같은 작품에 같은 URL 의 공식 링크가 이미 있음(상태와 무관). 기존 링크의 상태를 바꿔 다시 쓴다 */
+    WORK_LINK_ALREADY_EXISTS(HttpStatus.CONFLICT, "이 작품에 같은 URL 의 공식 링크가 이미 있습니다. 기존 링크의 상태를 바꿔 주세요."),
+    FIELD_SOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "근거를 찾을 수 없습니다."),
+
     // creator
     CREATOR_NOT_FOUND(HttpStatus.NOT_FOUND, "작가를 찾을 수 없습니다."),
     /** 관리자 수정 요청의 version 이 현재 작가 version 과 다름. 아무것도 바꾸지 않는다 */

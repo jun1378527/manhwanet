@@ -52,7 +52,7 @@ class WorkApiIntegrationTest {
     @BeforeEach
     void setUp() throws Exception {
         TestDatabaseCleaner.clean(jdbcTemplate, environment);
-        fixtures = new ApiFixtures(mockMvc, objectMapper);
+        fixtures = new ApiFixtures(mockMvc, objectMapper, jdbcTemplate);
         writerId = fixtures.createCreator("윤도현");   // id 1
         artistId = fixtures.createCreator("한서윤");   // id 2
     }
@@ -65,6 +65,7 @@ class WorkApiIntegrationTest {
         request.put("workFormat", "WEBTOON");
         request.put("originCountry", " kr ");
         request.put("description", "  몰락한 기사단 이야기  ");
+        request.put("evidence", descriptionEvidence());
         request.put("titles", List.of(
                 title("Moonlight Knights", "EN", false),
                 title(" 달빛 기사단　", "ko", true),
@@ -207,6 +208,7 @@ class WorkApiIntegrationTest {
         String maxDescription = "가".repeat(5_000);
         Map<String, Object> accepted = workRequest("달빛 기사단", writerId);
         accepted.put("description", maxDescription);
+        accepted.put("evidence", descriptionEvidence());
 
         fixtures.postJson(ADMIN_WORKS, accepted)
                 .andExpect(status().isCreated())
@@ -364,5 +366,10 @@ class WorkApiIntegrationTest {
         mockMvc.perform(request)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content[*].id").value(contains(ids)));
+    }
+
+    /** 제목·크레딧·줄거리(직접 작성) 근거(#40) */
+    private static List<Map<String, Object>> descriptionEvidence() {
+        return List.of(ApiFixtures.evidence("TITLE"), ApiFixtures.evidence("CREDIT"), ApiFixtures.evidence("DESCRIPTION"));
     }
 }

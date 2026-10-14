@@ -10,9 +10,10 @@ import com.manhwanet.global.error.VersionConflictException;
 import com.manhwanet.platform.application.PlatformAdminService;
 import com.manhwanet.platform.application.WorkListingService;
 import com.manhwanet.platform.dto.ChangePlatformStatusRequest;
-import com.manhwanet.platform.dto.PlatformStatusChangeResponse;
 import com.manhwanet.platform.dto.CreateListingRequest;
 import com.manhwanet.platform.dto.ListingMutationResponse;
+import com.manhwanet.platform.dto.PlatformStatusChangeResponse;
+import com.manhwanet.provenance.dto.EvidenceRequest;
 import com.manhwanet.review.dto.JsonInteger;
 import com.manhwanet.support.TestDatabaseCleaner;
 import java.time.Instant;
@@ -158,7 +159,7 @@ class WorkListingConcurrencyTest {
             Future<PlatformStatusChangeResponse> close = executor.submit(() -> {
                 barrier.await(10, TimeUnit.SECONDS);
                 return platformAdminService.changeStatus("KAKAO_PAGE", new ChangePlatformStatusRequest(new JsonInteger(0L),
-                        "CLOSED", "OFFICIAL", null, null, "https://page.kakao.com/notice", null), adminId);
+                        "CLOSED", "OFFICIAL", null, null, "https://page.kakao.com/notice", null, "종료 공지 확인"), adminId);
             });
             Object created = create.get(10, TimeUnit.SECONDS);
             PlatformStatusChangeResponse closed = close.get(10, TimeUnit.SECONDS);
@@ -188,6 +189,8 @@ class WorkListingConcurrencyTest {
     private static CreateListingRequest request(long version, String id) {
         return new CreateListingRequest(new JsonInteger(version), "KAKAO_PAGE", id,
                 "https://page.kakao.com/content/" + id, "SERIES", "MAIN", "ko", null, null,
-                Instant.parse("2026-10-12T00:00:00Z"), null);
+                Instant.parse("2026-10-12T00:00:00Z"), null,
+                List.of(new EvidenceRequest(null, null, null, "PLATFORM_PAGE_MANUAL", null,
+                        "https://page.kakao.com/content/" + id, Instant.parse("2026-10-12T00:00:00Z"), null)), null);
     }
 }

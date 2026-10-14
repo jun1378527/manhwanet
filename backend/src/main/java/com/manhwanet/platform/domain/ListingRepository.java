@@ -94,14 +94,15 @@ public class ListingRepository {
 
     /**
      * 이전 대상 평탄화: from 을 가리키던 같은 작품의 MOVED 연결이 to 를 가리키게 한다.
-     * from 이 MOVED 로 바뀔 때 함께 호출해 "MOVED 연결의 대상은 MOVED 가 아니다"를 유지한다.
+     * from 이 MOVED 로 바뀔 때 함께 호출해 "MOVED 연결의 대상은 MOVED 가 아니다"를 유지한다. 바뀐 연결 id 를 돌려준다(변경 기록용).
      */
-    public int repointMovedTo(long workId, long fromId, long toId) {
-        return jdbc.update("""
+    public List<Long> repointMovedTo(long workId, long fromId, long toId) {
+        return jdbc.queryForList("""
                 UPDATE work_platform_listings
                 SET moved_to_listing_id = :toId, updated_at = GREATEST(updated_at, now())
                 WHERE work_id = :workId AND moved_to_listing_id = :fromId
-                """, Map.of("workId", workId, "fromId", fromId, "toId", toId));
+                RETURNING id
+                """, Map.of("workId", workId, "fromId", fromId, "toId", toId), Long.class);
     }
 
     private static ListingRow map(ResultSet rs) throws SQLException {

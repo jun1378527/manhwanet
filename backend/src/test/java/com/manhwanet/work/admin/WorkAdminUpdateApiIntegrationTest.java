@@ -78,6 +78,7 @@ class WorkAdminUpdateApiIntegrationTest {
                 ApiFixtures.title("유미의 세포들", "ko", true),
                 ApiFixtures.title("Yumi's Cells", "en", false)));
         request.put("creators", List.of(ApiFixtures.credit(storyId, "STORY"), ApiFixtures.credit(storyId, "ART")));
+        request.put("evidence", allEvidence());
         MvcResult created = admin.postJson("/api/v1/admin/works", request);
         assertThat(created.getResponse().getStatus()).isEqualTo(201);
         workId = ((Number) JsonPath.read(created.getResponse().getContentAsString(), "$.data.id")).longValue();
@@ -113,7 +114,7 @@ class WorkAdminUpdateApiIntegrationTest {
         assertThat(userPut.getResponse().getStatus()).isEqualTo(403);
         assertThat(code(userPut)).isEqualTo("FORBIDDEN");
         MvcResult userCreatorPut = user.putRaw("/api/v1/admin/creators/" + storyId,
-                json(Map.of("version", 0, "name", "바뀐 이름")));
+                json(Map.of("version", 0, "name", "바뀐 이름", "reason", "작가 이름 수정")));
         assertThat(userCreatorPut.getResponse().getStatus()).isEqualTo(403);
 
         assertUnchanged();
@@ -128,7 +129,7 @@ class WorkAdminUpdateApiIntegrationTest {
         assertThat(code(result)).isEqualTo("INVALID_CSRF_TOKEN");
 
         MvcResult creator = admin.performWithSessionOnly(put("/api/v1/admin/creators/" + storyId)
-                .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("version", 0, "name", "바뀐 이름"))));
+                .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("version", 0, "name", "바뀐 이름", "reason", "작가 이름 수정"))));
         assertThat(creator.getResponse().getStatus()).isEqualTo(403);
         assertThat(code(creator)).isEqualTo("INVALID_CSRF_TOKEN");
 
@@ -212,6 +213,7 @@ class WorkAdminUpdateApiIntegrationTest {
                 ApiFixtures.title("Yumi's Cells", "en", false),
                 ApiFixtures.title("유미의 세포들", "ko", true)));
         same.put("creators", List.of(ApiFixtures.credit(storyId, "ART"), ApiFixtures.credit(storyId, "STORY")));
+        same.put("reason", "같은 내용 재전송");
 
         MvcResult result = admin.putRaw("/api/v1/admin/works/" + workId, json(same));
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
@@ -325,7 +327,7 @@ class WorkAdminUpdateApiIntegrationTest {
         assertThat(admin.putRaw("/api/v1/admin/works/" + workId, json(second)).getResponse().getStatus())
                 .isEqualTo(200);
         assertThat(admin.putRaw("/api/v1/admin/creators/" + storyId,
-                json(Map.of("version", 0, "name", "이동건(수정)"))).getResponse().getStatus()).isEqualTo(200);
+                json(Map.of("version", 0, "name", "이동건(수정)", "reason", "작가 이름 수정"))).getResponse().getStatus()).isEqualTo(200);
 
         assertThat(jdbcTemplate.queryForList(
                 "SELECT id, user_id, work_id, score_half, updated_at FROM work_ratings ORDER BY id")).isEqualTo(ratingsBefore);
@@ -350,6 +352,7 @@ class WorkAdminUpdateApiIntegrationTest {
         request.put("version", 0);
         request.put("name", "  이동건 작가  ");
         request.put("originalName", "Lee Dong-geon");
+        request.put("reason", "원어 표기 추가");
         MvcResult result = admin.putRaw("/api/v1/admin/creators/" + storyId, json(request));
         assertThat(result.getResponse().getStatus()).isEqualTo(200);
         String body = result.getResponse().getContentAsString();
@@ -372,7 +375,7 @@ class WorkAdminUpdateApiIntegrationTest {
 
         // 오래된 version 은 409, 현재 version 을 알려 준다
         MvcResult stale = admin.putRaw("/api/v1/admin/creators/" + storyId,
-                json(Map.of("version", 0, "name", "오래된 화면")));
+                json(Map.of("version", 0, "name", "오래된 화면", "reason", "작가 이름 수정")));
         assertThat(stale.getResponse().getStatus()).isEqualTo(409);
         assertThat(code(stale)).isEqualTo("CREATOR_VERSION_CONFLICT");
         assertThat(((Number) JsonPath.read(stale.getResponse().getContentAsString(), "$.error.currentVersion")).longValue())
@@ -380,7 +383,7 @@ class WorkAdminUpdateApiIntegrationTest {
         assertThat(creatorName(storyId)).isEqualTo("이동건 작가");
 
         // originalName 을 빼면 비운다(전체 교체)
-        MvcResult cleared = admin.putRaw("/api/v1/admin/creators/" + storyId, json(Map.of("version", 1, "name", "이동건 작가")));
+        MvcResult cleared = admin.putRaw("/api/v1/admin/creators/" + storyId, json(Map.of("version", 1, "name", "이동건 작가", "reason", "작가 이름 수정")));
         assertThat((Object) JsonPath.read(cleared.getResponse().getContentAsString(), "$.data.originalName")).isNull();
     }
 
@@ -391,13 +394,13 @@ class WorkAdminUpdateApiIntegrationTest {
         assertThat(fields(missingName)).contains("name");
 
         MvcResult blank = admin.putRaw("/api/v1/admin/creators/" + storyId,
-                json(Map.of("version", 0, "name", "   ", "originalName", " ")));
+                json(Map.of("version", 0, "name", "   ", "originalName", " ", "reason", "작가 이름 수정")));
         assertThat(fields(blank)).contains("name", "originalName");
 
         MvcResult badVersion = admin.putRaw("/api/v1/admin/creators/" + storyId, "{\"version\":\"0\",\"name\":\"가\"}");
         assertThat(fields(badVersion)).contains("version");
 
-        MvcResult missing = admin.putRaw("/api/v1/admin/creators/999999", json(Map.of("version", 0, "name", "가")));
+        MvcResult missing = admin.putRaw("/api/v1/admin/creators/999999", json(Map.of("version", 0, "name", "가", "reason", "작가 이름 수정")));
         assertThat(missing.getResponse().getStatus()).isEqualTo(404);
         assertThat(code(missing)).isEqualTo("CREATOR_NOT_FOUND");
 
@@ -417,7 +420,14 @@ class WorkAdminUpdateApiIntegrationTest {
                 ApiFixtures.title("Yumi's Cells", "en", true),
                 ApiFixtures.title("ユミの細胞たち", "ja", false)));
         request.put("creators", List.of(ApiFixtures.credit(storyId, "STORY"), ApiFixtures.credit(artId, "ART")));
+        request.put("evidence", allEvidence());
+        request.put("reason", "작품 정보 수정");
         return request;
+    }
+
+    /** 제목·크레딧·줄거리 근거(직접 확인, #40) */
+    private static List<Map<String, Object>> allEvidence() {
+        return List.of(ApiFixtures.evidence("TITLE"), ApiFixtures.evidence("CREDIT"), ApiFixtures.evidence("DESCRIPTION"));
     }
 
     private Map<String, Object> currentContent(long version) {
@@ -430,6 +440,8 @@ class WorkAdminUpdateApiIntegrationTest {
                 ApiFixtures.title("유미의 세포들", "ko", true),
                 ApiFixtures.title("Yumi's Cells", "en", false)));
         request.put("creators", List.of(ApiFixtures.credit(storyId, "STORY"), ApiFixtures.credit(storyId, "ART")));
+        request.put("evidence", allEvidence());
+        request.put("reason", "작품 정보 수정");
         return request;
     }
 

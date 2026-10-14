@@ -1,7 +1,11 @@
 package com.manhwanet.work.application;
 
+import com.manhwanet.audit.application.AdminChangeLog;
+import com.manhwanet.audit.domain.ChangeAction;
+import com.manhwanet.audit.domain.ChangeEntityType;
 import com.manhwanet.creator.application.CreatorService;
 import com.manhwanet.creator.application.CreatorSummary;
+import com.manhwanet.global.admin.AdminInputs;
 import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ConstraintViolations;
 import com.manhwanet.global.error.ErrorCode;
@@ -9,6 +13,18 @@ import com.manhwanet.global.error.InvalidInputException;
 import com.manhwanet.global.error.VersionConflictException;
 import com.manhwanet.global.response.ApiError;
 import com.manhwanet.global.response.PageResponse;
+import com.manhwanet.platform.application.WorkListingService;
+import com.manhwanet.platform.domain.ListingRepository;
+import com.manhwanet.platform.dto.ListingResponse;
+import com.manhwanet.provenance.application.Evidence;
+import com.manhwanet.provenance.application.ExternalIdDraft;
+import com.manhwanet.provenance.application.LinkDraft;
+import com.manhwanet.provenance.application.ProvenanceInputs;
+import com.manhwanet.provenance.application.ProvenanceQuery;
+import com.manhwanet.provenance.application.ProvenanceWriter;
+import com.manhwanet.provenance.domain.ExternalIdOwner;
+import com.manhwanet.provenance.domain.SourceField;
+import com.manhwanet.review.dto.JsonInteger;
 import com.manhwanet.work.domain.CountryCodes;
 import com.manhwanet.work.domain.CreatorRole;
 import com.manhwanet.work.domain.CreditView;
@@ -19,12 +35,11 @@ import com.manhwanet.work.domain.WorkCreator;
 import com.manhwanet.work.domain.WorkCreatorRepository;
 import com.manhwanet.work.domain.WorkCreditDraft;
 import com.manhwanet.work.domain.WorkFormat;
-import com.manhwanet.work.domain.WorkRepository;
 import com.manhwanet.work.domain.WorkRepository.LockedWork;
+import com.manhwanet.work.domain.WorkRepository;
 import com.manhwanet.work.domain.WorkTitle;
 import com.manhwanet.work.domain.WorkTitleDraft;
 import com.manhwanet.work.domain.WorkTitleRepository;
-import com.manhwanet.review.dto.JsonInteger;
 import com.manhwanet.work.dto.AdminWorkDetailResponse;
 import com.manhwanet.work.dto.CreateWorkRequest;
 import com.manhwanet.work.dto.CreditResponse;
@@ -34,9 +49,11 @@ import com.manhwanet.work.dto.UpdateWorkRequest;
 import com.manhwanet.work.dto.WorkDetailResponse;
 import com.manhwanet.work.dto.WorkSummaryResponse;
 import com.manhwanet.work.dto.WorkTitleResponse;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -74,37 +91,85 @@ public class WorkService {
     private final WorkCreatorRepository workCreatorRepository;
     private final CreatorService creatorService;
     private final WorkRatingSummaryQuery ratingSummaryQuery;
+    private final WorkListingService workListingService;
+    private final ListingRepository listingRepository;
+    private final ProvenanceWriter provenanceWriter;
+    private final ProvenanceQuery provenanceQuery;
+    private final AdminChangeLog changeLog;
+    private final Clock clock = Clock.systemUTC();
 
     public WorkService(
             WorkRepository workRepository,
             WorkTitleRepository workTitleRepository,
             WorkCreatorRepository workCreatorRepository,
             CreatorService creatorService,
-            WorkRatingSummaryQuery ratingSummaryQuery) {
+            WorkRatingSummaryQuery ratingSummaryQuery,
+            WorkListingService workListingService,
+            ListingRepository listingRepository,
+            ProvenanceWriter provenanceWriter,
+            ProvenanceQuery provenanceQuery,
+            AdminChangeLog changeLog) {
         this.workRepository = workRepository;
         this.workTitleRepository = workTitleRepository;
         this.workCreatorRepository = workCreatorRepository;
         this.creatorService = creatorService;
         this.ratingSummaryQuery = ratingSummaryQuery;
+        this.workListingService = workListingService;
+        this.listingRepository = listingRepository;
+        this.provenanceWriter = provenanceWriter;
+        this.provenanceQuery = provenanceQuery;
+        this.changeLog = changeLog;
     }
 
+    /**
+     * 작품 등록(#40 §5.6 확장). 순서: 입력 검증(제목·크레딧·근거·연결·외부 ID·링크, 400) → 작품 저장 → 변경 기록(WORK CREATE)
+     * → 연결 → 외부 ID → 공식 링크 → 근거. 모두 한 트랜잭션이라 연결·외부 ID 중복(409)이나 기록 실패 시 작품도 남지 않는다.
+     * 새 작품의 version 은 0 이다(함께 넣은 하위 리소스는 첫 상태의 일부).
+     */
     @Transactional
-    public WorkDetailResponse register(CreateWorkRequest request) {
+    public AdminWorkDetailResponse register(CreateWorkRequest request, long actorId) {
         List<ApiError.FieldError> errors = new ArrayList<>();
+        AdminInputs in = new AdminInputs(errors);
 
         WorkFormat workFormat = WorkFormat.valueOf(request.workFormat());
         String originCountry = normalizeOriginCountry(request.originCountry(), errors);
         String description = normalizeDescription(request.description(), errors);
         List<WorkTitleDraft> titles = normalizeTitles(request.titles(), errors);
         List<WorkCreditDraft> credits = normalizeCredits(request.creators(), errors);
-
+        List<Evidence> evidence = ProvenanceInputs.evidence(request.evidence(), "evidence", in, clock,
+                ProvenanceInputs.WORK_FIELDS, null, false);
+        ProvenanceInputs.require(evidence, SourceField.TITLE, "evidence", in);
+        ProvenanceInputs.require(evidence, SourceField.CREDIT, "evidence", in);
+        if (description != null) {
+            ProvenanceInputs.require(evidence, SourceField.DESCRIPTION, "evidence", in);
+        }
+        List<ExternalIdDraft> externalIds = ProvenanceInputs.externalIds(request.externalIds(), "externalIds", in,
+                clock);
+        List<LinkDraft> links = ProvenanceInputs.links(request.links(), "links", in, clock);
+        String reason = in.reason(request.reason(), false);
+        List<WorkListingService.PreparedListing> listings = workListingService.prepareForNewWork(request.listings(),
+                in);
+        if (errors.isEmpty()) {
+            provenanceWriter.rejectPlatformHosts(links, in);
+        }
         if (!errors.isEmpty()) {
             throw new InvalidInputException(errors);
         }
 
         Work work = save(Work.create(workFormat, originCountry, description, titles, credits));
+        long workId = work.getId();
+        changeLog.record(ChangeEntityType.WORK, String.valueOf(workId), ChangeAction.CREATE, workId, null, null,
+                snapshot(workFormat.name(), originCountry, description, titles, credits), reason, actorId);
+        workListingService.insertForNewWork(workId, listings, actorId, reason);
+        for (ExternalIdDraft externalId : externalIds) {
+            provenanceWriter.addExternalId(ExternalIdOwner.WORK, workId, externalId, actorId, reason);
+        }
+        for (LinkDraft link : links) {
+            provenanceWriter.addLink(workId, link, actorId, reason);
+        }
+        provenanceWriter.addEvidence(workId, evidence, actorId, reason);
         // 새 작품에는 별점이 없으므로 집계 SQL 을 실행하지 않는다.
-        return toDetail(work, RatingSummaryResponse.EMPTY);
+        return adminDetail(work.getVersion(), toDetail(work, RatingSummaryResponse.EMPTY));
     }
 
     /**
@@ -127,7 +192,28 @@ public class WorkService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.WORK_NOT_FOUND));
         RatingSummaryResponse rating = ratingSummaryQuery.findByWorkIds(List.of(work.getId()))
                 .getOrDefault(work.getId(), RatingSummaryResponse.EMPTY);
-        return AdminWorkDetailResponse.of(work.getVersion(), toDetail(work, rating));
+        return adminDetail(work.getVersion(), toDetail(work, rating));
+    }
+
+    private AdminWorkDetailResponse adminDetail(long version, WorkDetailResponse detail) {
+        long workId = detail.id();
+        return AdminWorkDetailResponse.of(version, detail,
+                listingRepository.findByWorkId(workId).stream().map(ListingResponse::from).toList(),
+                provenanceQuery.externalIds(ExternalIdOwner.WORK, workId),
+                provenanceQuery.links(workId),
+                provenanceQuery.fieldSources(workId));
+    }
+
+    /** 변경 기록에 남기는 작품 핵심 정보(제목·크레딧은 요청 순서) */
+    private static Map<String, Object> snapshot(String workFormat, String originCountry, String description,
+            List<WorkTitleDraft> titles, List<WorkCreditDraft> credits) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("workFormat", workFormat);
+        map.put("originCountry", originCountry);
+        map.put("description", description);
+        map.put("titles", titles);
+        map.put("credits", credits);
+        return map;
     }
 
     /**
@@ -143,14 +229,18 @@ public class WorkService {
      * 작품 ID는 바뀌지 않는다. 별점·리뷰는 작품 ID에만 묶여 있어 영향을 받지 않는다.
      */
     @Transactional
-    public AdminWorkDetailResponse update(Long workId, UpdateWorkRequest request) {
+    public AdminWorkDetailResponse update(Long workId, UpdateWorkRequest request, long actorId) {
         List<ApiError.FieldError> errors = new ArrayList<>();
+        AdminInputs in = new AdminInputs(errors);
         Long version = version(request.version(), errors);
         WorkFormat workFormat = WorkFormat.valueOf(request.workFormat());
         String originCountry = normalizeOriginCountry(request.originCountry(), errors);
         String description = normalizeDescription(request.description(), errors);
         List<WorkTitleDraft> titles = normalizeTitles(request.titles(), errors);
         List<WorkCreditDraft> credits = normalizeCredits(request.creators(), errors);
+        List<Evidence> evidence = ProvenanceInputs.evidence(request.evidence(), "evidence", in, clock,
+                ProvenanceInputs.WORK_FIELDS, null, false);
+        String reason = in.reason(request.reason(), true);
         if (!errors.isEmpty()) {
             throw new InvalidInputException(errors);
         }
@@ -165,11 +255,26 @@ public class WorkService {
         boolean coreChanged = !current.getWorkFormat().equals(workFormat.name())
                 || !Objects.equals(current.getOriginCountry(), originCountry)
                 || !Objects.equals(current.getDescription(), description);
-        boolean titlesChanged = !Set.copyOf(workTitleRepository.findDrafts(workId)).equals(Set.copyOf(titles));
-        boolean creditsChanged = !Set.copyOf(workCreatorRepository.findDrafts(workId)).equals(Set.copyOf(credits));
+        List<WorkTitleDraft> currentTitles = workTitleRepository.findDrafts(workId);
+        List<WorkCreditDraft> currentCredits = workCreatorRepository.findDrafts(workId);
+        boolean titlesChanged = !Set.copyOf(currentTitles).equals(Set.copyOf(titles));
+        boolean creditsChanged = !Set.copyOf(currentCredits).equals(Set.copyOf(credits));
         if (!coreChanged && !titlesChanged && !creditsChanged) {
             return getAdminWork(workId);
         }
+        // 근거 필수 규칙(명세 §5.4): 실제로 바뀐 필드만 확인한다. 줄거리를 비우는 경우는 근거가 필요 없다
+        if (titlesChanged) {
+            ProvenanceInputs.require(evidence, SourceField.TITLE, "evidence", in);
+        }
+        if (creditsChanged) {
+            ProvenanceInputs.require(evidence, SourceField.CREDIT, "evidence", in);
+        }
+        if (description != null && !Objects.equals(current.getDescription(), description)) {
+            ProvenanceInputs.require(evidence, SourceField.DESCRIPTION, "evidence", in);
+        }
+        in.throwIfAny();
+        Map<String, Object> before = snapshot(current.getWorkFormat(), current.getOriginCountry(),
+                current.getDescription(), currentTitles, currentCredits);
 
         try {
             if (titlesChanged) {
@@ -195,6 +300,9 @@ public class WorkService {
         if (updated != 1) {
             throw new IllegalStateException("locked work was not updated: " + workId);
         }
+        changeLog.record(ChangeEntityType.WORK, String.valueOf(workId), ChangeAction.UPDATE, workId, null, before,
+                snapshot(workFormat.name(), originCountry, description, titles, credits), reason, actorId);
+        provenanceWriter.addEvidence(workId, evidence, actorId, reason);
         return getAdminWork(workId);
     }
 

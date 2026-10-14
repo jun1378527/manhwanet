@@ -1,22 +1,33 @@
 package com.manhwanet.creator.application;
 
+import com.manhwanet.audit.application.AdminChangeLog;
+import com.manhwanet.audit.domain.ChangeAction;
+import com.manhwanet.audit.domain.ChangeEntityType;
+import com.manhwanet.creator.domain.Creator;
+import com.manhwanet.creator.domain.CreatorRepository.LockedCreator;
+import com.manhwanet.creator.domain.CreatorRepository;
 import com.manhwanet.creator.dto.AdminCreatorResponse;
 import com.manhwanet.creator.dto.CreateCreatorRequest;
 import com.manhwanet.creator.dto.CreatorResponse;
 import com.manhwanet.creator.dto.UpdateCreatorRequest;
-import com.manhwanet.creator.domain.Creator;
-import com.manhwanet.creator.domain.CreatorRepository;
-import com.manhwanet.creator.domain.CreatorRepository.LockedCreator;
+import com.manhwanet.global.admin.AdminInputs;
 import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.error.InvalidInputException;
 import com.manhwanet.global.error.VersionConflictException;
-import com.manhwanet.review.dto.JsonInteger;
 import com.manhwanet.global.response.ApiError;
 import com.manhwanet.global.response.PageResponse;
+import com.manhwanet.provenance.application.ExternalIdDraft;
+import com.manhwanet.provenance.application.ProvenanceInputs;
+import com.manhwanet.provenance.application.ProvenanceQuery;
+import com.manhwanet.provenance.application.ProvenanceWriter;
+import com.manhwanet.provenance.domain.ExternalIdOwner;
+import com.manhwanet.review.dto.JsonInteger;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,23 +44,45 @@ import org.springframework.transaction.annotation.Transactional;
 public class CreatorService {
 
     private final CreatorRepository creatorRepository;
+    private final ProvenanceWriter provenanceWriter;
+    private final ProvenanceQuery provenanceQuery;
+    private final AdminChangeLog changeLog;
+    private final Clock clock = Clock.systemUTC();
 
-    public CreatorService(CreatorRepository creatorRepository) {
+    public CreatorService(CreatorRepository creatorRepository, ProvenanceWriter provenanceWriter,
+            ProvenanceQuery provenanceQuery, AdminChangeLog changeLog) {
         this.creatorRepository = creatorRepository;
+        this.provenanceWriter = provenanceWriter;
+        this.provenanceQuery = provenanceQuery;
+        this.changeLog = changeLog;
     }
 
+    /**
+     * 작가 등록. 외부 ID 를 함께 받으면 한 트랜잭션에서 저장하고, 같은 출처·ID 가 이미 있으면 409 로 작가도 남지 않는다(#40).
+     * 변경 기록(CREATOR CREATE)을 같은 트랜잭션에 남긴다.
+     */
     @Transactional
-    public CreatorResponse register(CreateCreatorRequest request) {
+    public AdminCreatorResponse register(CreateCreatorRequest request, long actorId) {
         List<ApiError.FieldError> errors = new ArrayList<>();
+        AdminInputs in = new AdminInputs(errors);
         String name = normalizeName("name", request.name(), errors);
         String originalName = request.originalName() == null
                 ? null
                 : normalizeName("originalName", request.originalName(), errors);
+        List<ExternalIdDraft> externalIds = ProvenanceInputs.externalIds(request.externalIds(), "externalIds", in,
+                clock);
+        String reason = in.reason(request.reason(), false);
         if (!errors.isEmpty()) {
             throw new InvalidInputException(errors);
         }
-        Creator creator = creatorRepository.save(Creator.create(name, originalName));
-        return CreatorResponse.from(creator);
+        Creator creator = creatorRepository.saveAndFlush(Creator.create(name, originalName));
+        long creatorId = creator.getId();
+        changeLog.record(ChangeEntityType.CREATOR, String.valueOf(creatorId), ChangeAction.CREATE, null, creatorId,
+                null, names(name, originalName), reason, actorId);
+        for (ExternalIdDraft externalId : externalIds) {
+            provenanceWriter.addExternalId(ExternalIdOwner.CREATOR, creatorId, externalId, actorId, reason);
+        }
+        return getAdminCreator(creatorId);
     }
 
     public CreatorResponse getCreator(Long creatorId) {
@@ -68,6 +101,7 @@ public class CreatorService {
                 creator.getName(),
                 creator.getOriginalName(),
                 creatorRepository.countLinkedWorks(creator.getId()),
+                provenanceQuery.externalIds(ExternalIdOwner.CREATOR, creator.getId()),
                 creator.getCreatedAt(),
                 creator.getUpdatedAt());
     }
@@ -78,7 +112,7 @@ public class CreatorService {
      * 작가 ID는 바뀌지 않으며, 이 작가를 크레딧에 둔 작품들의 표시 이름이 함께 바뀐다.
      */
     @Transactional
-    public AdminCreatorResponse update(Long creatorId, UpdateCreatorRequest request) {
+    public AdminCreatorResponse update(Long creatorId, UpdateCreatorRequest request, long actorId) {
         List<ApiError.FieldError> errors = new ArrayList<>();
         Long version = version(request == null ? null : request.version(), errors);
         String name = null;
@@ -90,6 +124,7 @@ public class CreatorService {
         String originalName = request == null || request.originalName() == null
                 ? null
                 : normalizeName("originalName", request.originalName(), errors);
+        String reason = new AdminInputs(errors).reason(request == null ? null : request.reason(), true);
         if (!errors.isEmpty()) {
             throw new InvalidInputException(errors);
         }
@@ -104,8 +139,20 @@ public class CreatorService {
             if (updated != 1) {
                 throw new IllegalStateException("locked creator was not updated: " + creatorId);
             }
+            Map<String, Object> after = names(name, originalName);
+            // 작가 이름은 크레딧에 둔 모든 작품의 표시를 바꾸므로 영향받는 작품 수를 함께 남긴다(명세 §5.2)
+            after.put("linkedWorkCount", creatorRepository.countLinkedWorks(creatorId));
+            changeLog.record(ChangeEntityType.CREATOR, String.valueOf(creatorId), ChangeAction.UPDATE, null,
+                    creatorId, names(current.getName(), current.getOriginalName()), after, reason, actorId);
         }
         return getAdminCreator(creatorId);
+    }
+
+    private static Map<String, Object> names(String name, String originalName) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("name", name);
+        map.put("originalName", originalName);
+        return map;
     }
 
     public PageResponse<CreatorResponse> getCreators(Pageable pageable) {

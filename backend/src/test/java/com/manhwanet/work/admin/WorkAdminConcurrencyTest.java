@@ -8,6 +8,7 @@ import com.manhwanet.creator.domain.CreatorRepository;
 import com.manhwanet.creator.dto.UpdateCreatorRequest;
 import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.error.VersionConflictException;
+import com.manhwanet.provenance.dto.EvidenceRequest;
 import com.manhwanet.review.dto.JsonInteger;
 import com.manhwanet.support.TestDatabaseCleaner;
 import com.manhwanet.work.application.WorkService;
@@ -16,6 +17,7 @@ import com.manhwanet.work.dto.AdminWorkDetailResponse;
 import com.manhwanet.work.dto.CreateWorkRequest.CreditRequest;
 import com.manhwanet.work.dto.CreateWorkRequest.TitleRequest;
 import com.manhwanet.work.dto.UpdateWorkRequest;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -75,11 +77,16 @@ class WorkAdminConcurrencyTest {
     private long creatorA;
     private long creatorB;
     private long workId;
+    private long adminId;
 
     @BeforeEach
     void setUp() {
         dropTestTrigger();
         TestDatabaseCleaner.clean(jdbcTemplate, environment);
+        adminId = jdbcTemplate.queryForObject("""
+                INSERT INTO users (email, password_hash, nickname, role)
+                VALUES ('admin@manhwanet.test', '{noop}unused', '관리자', 'ADMIN') RETURNING id
+                """, Long.class);
         creatorA = jdbcTemplate.queryForObject("INSERT INTO creators (name) VALUES ('작가A') RETURNING id", Long.class);
         creatorB = jdbcTemplate.queryForObject("INSERT INTO creators (name) VALUES ('작가B') RETURNING id", Long.class);
         workId = jdbcTemplate.queryForObject("INSERT INTO works (work_format) VALUES ('WEBTOON') RETURNING id", Long.class);
@@ -149,7 +156,7 @@ class WorkAdminConcurrencyTest {
         assertThat(locked.await(WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
         Future<Object> waiting = executor.submit(() -> {
             try {
-                return workService.update(workId, request(0, "T2 제목", creatorB));
+                return workService.update(workId, request(0, "T2 제목", creatorB), adminId);
             } catch (VersionConflictException e) {
                 return e;
             }
@@ -208,7 +215,7 @@ class WorkAdminConcurrencyTest {
                 FOR EACH ROW EXECUTE FUNCTION test_fail_work_update()
                 """);
 
-        assertThatThrownBy(() -> workService.update(workId, request(0, "실패할 제목", creatorB)))
+        assertThatThrownBy(() -> workService.update(workId, request(0, "실패할 제목", creatorB), adminId))
                 .isInstanceOf(RuntimeException.class)
                 .isNotInstanceOf(VersionConflictException.class);
 
@@ -231,7 +238,7 @@ class WorkAdminConcurrencyTest {
         CountDownLatch release = new CountDownLatch(1);
         // 실제 수정(제목·크레딧 교체와 works UPDATE)을 끝낸 뒤 커밋하지 않고 기다린다
         Future<?> holder = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
-            workService.update(workId, request(0, "수정 중", creatorB));
+            workService.update(workId, request(0, "수정 중", creatorB), adminId);
             updated.countDown();
             await(release);
         }));
@@ -264,7 +271,7 @@ class WorkAdminConcurrencyTest {
         try {
             assertThat(locked.await(WAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
             Future<AdminWorkDetailResponse> update = executor.submit(
-                    () -> workService.update(workId, request(0, "작가B 작품", creatorB)));
+                    () -> workService.update(workId, request(0, "작가B 작품", creatorB), adminId));
             assertThat(update.get(WAIT_SECONDS, TimeUnit.SECONDS).version()).isEqualTo(1);
         } finally {
             release.countDown();
@@ -277,7 +284,7 @@ class WorkAdminConcurrencyTest {
     private Object attempt(CyclicBarrier barrier, UpdateWorkRequest request) throws Exception {
         barrier.await(WAIT_SECONDS, TimeUnit.SECONDS);
         try {
-            return workService.update(workId, request);
+            return workService.update(workId, request, adminId);
         } catch (VersionConflictException e) {
             return e;
         }
@@ -286,7 +293,7 @@ class WorkAdminConcurrencyTest {
     private Object attemptCreator(CyclicBarrier barrier, long version, String name) throws Exception {
         barrier.await(WAIT_SECONDS, TimeUnit.SECONDS);
         try {
-            return creatorService.update(creatorA, new UpdateCreatorRequest(new JsonInteger(version), name, null));
+            return creatorService.update(creatorA, new UpdateCreatorRequest(new JsonInteger(version), name, null, "동시 수정 테스트"), adminId);
         } catch (VersionConflictException e) {
             return e;
         }
@@ -297,7 +304,12 @@ class WorkAdminConcurrencyTest {
         titles.add(new TitleRequest(primaryTitle, "ko", true));
         titles.add(new TitleRequest(primaryTitle + "-en", "en", false));
         return new UpdateWorkRequest(new JsonInteger(version), "PAGE_COMIC", null, null,
-                titles, List.of(new CreditRequest(creatorId, "STORY")));
+                titles, List.of(new CreditRequest(creatorId, "STORY")),
+                List.of(evidence("TITLE"), evidence("CREDIT")), "동시 수정 테스트");
+    }
+
+    private static EvidenceRequest evidence(String field) {
+        return new EvidenceRequest(field, null, null, "STAFF", null, null, Instant.parse("2026-10-12T00:00:00Z"), null);
     }
 
     private long currentVersion() {

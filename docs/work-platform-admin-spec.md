@@ -1,12 +1,13 @@
 # 작품·플랫폼 관리 구현 명세 (초안)
 
-> **상태: 초안. 사용자 검토 대기 (#37).** #38로 §5.1·§5.2와 V6을, #39로 §5.3·§5.5와 V7을 구현했습니다. V8과 그 밖의 절은 후속 설계입니다. 이 문서는 구현 이슈(§12)의 기준입니다.
+> **상태: 초안. 사용자 검토 대기 (#37).** #38로 §5.1·§5.2와 V6을, #39로 §5.3·§5.5와 V7을, #40으로 §3.3·§5.4·§5.6과 V8을 구현했습니다. 그 밖의 절은 후속 설계입니다. 이 문서는 구현 이슈(§12)의 기준입니다.
 > 기준 커밋: `1435e91`. 조사 근거는 [work-data-design-draft.md](work-data-design-draft.md)(§3.4 플랫폼 조사표, §3.4.4 판단 4구분, §3.4.5 ID 단위)를 따릅니다.
 > **범위 변경 (2026-10-11):** 데이터 확보 범위가 10개 플랫폼 공개 작품 전체로 바뀌었습니다. 이 명세(V6~V8)는 전체 수집의 기반으로 그대로 쓰고, staging·수집 실행 기록(V9~V11)은 [work-collection-design.md](work-collection-design.md)에 있습니다. 반영할 변경: `work_platform_listings`의 `age_rating_note`를 `age_rating_raw`로 바꾸고 `age_class`(`GENERAL`·`ADULT`·`UNKNOWN`)를 추가합니다(수집 설계 §8.3). §10 파일럿은 완료 조건이 아니라 수집기 검증 단계입니다(수집 설계 §14).
 > **#38 구현 (2026-10-12):** §5.1·§5.2의 작품·작가 관리자 조회·수정과 버전 충돌 방지를 구현했습니다. V6은 `works.version`·`creators.version`만 추가했고, `visibility`·`duplicate_of_work_id`와 숨김·중복 표시 API는 #41로 옮겼습니다(§3.1). `reason`·`evidence[]`와 변경 기록은 #40에서 추가합니다. 구현 세부는 §5.1 "구현 기록"을 보세요.
 > **등급 규칙 변경 (2026-10-12, 사용자 지시):** 이전의 "전체 이용가 전용·성인 거절" 파일럿 규칙은 폐기했습니다. 18세 미만 등급은 `GENERAL`, 성인 등급은 `ADULT`, 표기가 없거나 확인하지 못하면 `UNKNOWN`이며, 원래 표기를 보존합니다. `UNKNOWN`은 일반으로 처리하지 않습니다(§5.3, §10, S-12).
 > **#39 구현 (2026-10-13):** V7(플랫폼 코드 표·허용 호스트·상태 이력·작품 플랫폼 연결)과 §5.3·§5.5의 관리자 API를 구현했습니다. 계약은 §3.2 구현 기록과 `V7__create_platforms_and_work_listings.sql`입니다. 외부 ID·근거·변경 기록(#40), 숨김·중복 검수(#41), 공개 표시(#42)는 포함하지 않았습니다.
-> 적용된 마이그레이션 V1~V6은 고치지 않습니다. **#39의 마이그레이션은 V7(플랫폼·허용 호스트·상태 이력·작품 연결)입니다.** V8(외부 ID·공식 링크·필드 근거·관리 변경 기록)은 #40이며 아직 포함하지 않았습니다.
+> 적용된 마이그레이션 V1~V6은 고치지 않습니다. **#39의 마이그레이션은 V7(플랫폼·허용 호스트·상태 이력·작품 연결)입니다.** **#40의 마이그레이션은 V8(외부 ID·공식 링크·필드 근거·관리 변경 기록)입니다.**
+> **#40 구현 (2026-10-14):** §3.3·§5.4·§5.6과 수정 사유·변경 기록을 구현했습니다. 기존 등록·수정·연결·플랫폼 API 에 `reason`·`evidence[]`를 넣었고, 계약과 설계와 다른 점은 §3.3 "구현 기록 (#40)"에 있습니다. 숨김·중복 검수(#41), 공개 표시(#42), 수집기는 포함하지 않았습니다.
 
 - 관련 문서: [work-creator-spec.md](work-creator-spec.md)(작품·작가 등록·조회), [review-design-draft.md](review-design-draft.md)(버전 충돌 방식), [rating-design-draft.md](rating-design-draft.md), [auth-design-draft.md](auth-design-draft.md)(ADMIN·CSRF), [architecture.md](architecture.md)
 - 표기: **[결정]** 이 명세의 정한 값, **[선택]** 사용자가 고를 수 있는 구현 선택(§11), **[후속]** 이번 범위 밖
@@ -173,6 +174,35 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 - 외부 ID·링크·근거 행도 지우지 않고 상태로 비활성화합니다. 변경 기록에는 이메일·비밀번호 같은 개인 정보를 넣지 않습니다(actor는 사용자 ID만).
 - 새 테이블의 작품 FK는 **CASCADE를 두지 않습니다.** 작품 삭제 경로가 없으므로 필요 없고, 실수로 지울 때 함께 사라지지 않게 합니다.
 
+> 위 SQL 은 #37 설계안입니다. **실제 계약은 아래 구현 기록과 `V8__create_external_ids_links_sources_change_log.sql`입니다.**
+
+**구현 기록 (#40, 2026-10-14)**
+
+| 항목 | 구현 |
+|---|---|
+| 마이그레이션 | `V8__create_external_ids_links_sources_change_log.sql`(새 파일). V1~V7은 고치지 않았습니다. 새 표는 JPA 엔티티 없이 JDBC로 읽고 씁니다(`ddl-auto=validate` 영향 없음) |
+| 외부 ID | `work_external_ids`·`creator_external_ids`: 출처(`WIKIDATA`·`MADB`·`NDL`·`KMAS`), 외부 ID, 출처 URL(선택), 상태(`ACTIVE`·`SUPERSEDED`·`INVALID`), 확인 시각·확인자, 메모. 설계의 `UNIQUE(source, external_id)` 대신 **`INVALID`가 아닌 행만 유일한 부분 유니크 인덱스**입니다. 잘못 연결한 ID를 `INVALID`로 바꾸면 올바른 대상에 다시 연결할 수 있고, `SUPERSEDED`(출처에서 대체됨)는 자리를 유지합니다. 작품 표와 작가 표는 따로 유일합니다 |
+| 외부 ID 형식 | Wikidata 는 `Q`+숫자(소문자 `q`는 대문자로)만 받습니다. MADB·NDL·KMAS 는 형식을 확인하지 못해 보이는 ASCII 1~100자만 검사하고 응답에 `EXTERNAL_ID_FORMAT_UNVERIFIED` 경고를 줍니다 |
+| 공식 링크 | `work_links`: `PUBLISHER`·`OFFICIAL_SITE`, URL, 언어, 상태(`ACTIVE`·`BROKEN`·`REMOVED`), 확인 시각·확인자. `UNIQUE(work_id, url)`(상태와 무관, 다시 쓰려면 상태를 바꿈). URL 은 플랫폼 URL 과 같은 정규화·검사(https·사용자 정보·포트·조각·숨은 문자·점 경로)를 하되 호스트는 도메인 이름 형식만 봅니다(IP·localhost 거절). **플랫폼 허용 호스트의 주소는 링크가 아니라 연결로 등록**하도록 400 입니다 |
+| 필드별 근거 | `work_field_sources`: 필드(`TITLE`·`CREDIT`·`WORK_FORMAT`·`ORIGIN_COUNTRY`·`DESCRIPTION`·`LISTING`), 근거 종류(`PLATFORM_PAGE_MANUAL`·`WIKIDATA`·`MADB`·`NDL`·`KMAS`·`PUBLISHER_PAGE`·`STAFF`·`LICENSED`), `source_ref`·`source_url`, 상태(`ACTIVE`·`RETRACTED`). 줄거리 근거는 `STAFF`·`LICENSED`만, `STAFF` 외에는 `source_ref`나 `source_url`, `LICENSED`는 허락 근거 `source_ref`가 필요합니다(DB CHECK와 서비스 검증이 같음). `LISTING` 근거는 같은 작품의 연결만 가리킵니다(복합 FK). 제목·크레딧 행은 수정 때 다시 만들어 ID 가 바뀌므로 설계의 `target_ref`(행 참조)는 사람이 읽는 값 설명(예: `ko:유미의 세포들`)으로 바꿨습니다 |
+| 변경 기록 | `admin_change_log`: 대상 종류(`WORK`·`CREATOR`·`LISTING`·`PLATFORM`·`WORK_EXTERNAL_ID`·`CREATOR_EXTERNAL_ID`·`WORK_LINK`·`FIELD_SOURCE`)·대상 ID·동작(`CREATE`·`UPDATE`·`STATUS_CHANGE`·`MOVE`)·작품 ID·작가 ID·이전/이후 JSON·사유·관리자 사용자 ID·시각. `CREATE`만 이전 값이 없고, 그 밖에는 이전 값과 사유가 반드시 있습니다(CHECK). **UPDATE·DELETE 를 거절하는 트리거로 추가만** 할 수 있습니다. 설계의 `HIDE`·`MARK_DUPLICATE`·`UNHIDE`는 #41에서 추가합니다. 이메일 등 개인 정보는 넣지 않습니다 |
+| 원자성 | 변경과 기록은 같은 트랜잭션입니다(기록 쓰기는 `Propagation.MANDATORY`). 기록이나 version 증가가 실패하면 변경도 되돌아갑니다(트리거로 실패를 주입해 검증). 내용이 같아 바뀌지 않은 요청은 version·근거·기록을 남기지 않습니다 |
+| 버전 | 작품 외부 ID·링크·근거 변경은 S-3대로 작품 `version`을 받고 올립니다. 작가 외부 ID 는 작가 `version`을 씁니다. 등록과 함께 넣은 하위 리소스는 첫 상태의 일부라 새 작품·작가의 `version`은 0 입니다 |
+| 수정 사유 | 수정·상태 변경·이전 요청(작품·작가 `PUT`, 연결 `PUT`·`move`, 외부 ID·링크·근거 `PATCH`, 플랫폼 `PUT`·상태 변경)은 `reason`(1~500자)이 **필수**입니다. 등록·추가는 선택입니다. 플랫폼 상태 변경의 `note`는 상태 이력 메모로 그대로 두고, `reason`은 변경 기록의 사유입니다 |
+| 근거 필수 규칙 | 작품 등록: `TITLE`·`CREDIT` 각 1개 이상, 줄거리가 있으면 `DESCRIPTION` 1개 이상. 작품 `PUT`: **실제로 바뀐** 제목·크레딧·줄거리(비우는 경우 제외)만 근거가 필요합니다(이 확인은 잠금·내용 비교 뒤라 400 이 version 확인 뒤에 날 수 있음). 새 연결(등록·이전·작품 등록의 `listings[]`): 연결 근거 1개 이상(`field` 생략 시 `LISTING`). 형식·국가 근거와 연결 수정 근거는 선택입니다 |
+| 등록 확장 | `POST /admin/works`에 `listings[]`·`externalIds[]`·`links[]`·`evidence[]`·`reason`. 모든 입력을 먼저 검증(400)한 뒤 작품 → 변경 기록 → 연결 → 외부 ID → 링크 → 근거 순으로 저장합니다. 연결·외부 ID 가 이미 있으면 409 로 등록 전체가 롤백되므로 **재시도해도 작품이 두 번 생기지 않습니다**(키 없는 등록은 여전히 멱등이 아님). 응답은 관리자 상세(`version`·연결·외부 ID·링크·근거 포함)로 바뀌었습니다. `POST /admin/creators`도 `externalIds[]`·`reason`을 받고 관리자 상세를 돌려줍니다 |
+| 관리자 상세 | `GET /admin/works/{id}`에 `listings`·`externalIds`·`links`·`fieldSources`(비활성 행 포함), `GET /admin/creators/{id}`에 `externalIds`를 더했습니다. 공개 API 에는 아직 내보내지 않습니다(#42) |
+| 테스트 픽스처 | 변경 기록이 사용자 FK를 가지므로 `ApiFixtures`는 테스트 DB 에 실제 ADMIN 행을 만들고 그 ID 의 `AuthenticatedUser`로 요청합니다 |
+
+결정하지 않은 정책(이번에 기본 동작만 정함)
+
+- MADB·NDL·KMAS 외부 ID 의 정확한 형식, Wikidata 출처 URL 의 호스트 제한
+- 같은 Wikidata ID 를 작품과 작가에 동시에 붙이는 경우(지금은 표가 달라 막지 않음)
+- 형식·국가 변경에도 근거를 필수로 할지(지금은 선택)
+- `PATCH`의 `note`를 비우는 방법(지금은 생략·null 이면 유지)
+- 변경 기록 보관 기간과 줄거리 전문을 이전·이후 값에 그대로 남길지
+- 관리자 상세의 근거 목록이 커질 때의 쪽 나누기
+
 ---
 
 ## 4. 플랫폼 작품 ID 규칙
@@ -225,7 +255,7 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 | 주의 | `works`·`creators`의 일반 컬럼에 유니크 인덱스를 추가하면 PostgreSQL이 `UPDATE`를 `FOR UPDATE` 잠금으로 올려 별점·리뷰·크레딧 삽입을 막게 됩니다. 이런 인덱스는 별도 테이블에 둡니다 |
 | 줄거리 | 전체 교체라서 `description`을 생략하거나 `null`로 보내면 비웁니다. 작가 `originalName`도 같습니다 |
 | 응답 | `AdminWorkDetailResponse` = 공개 상세 필드 + `version`. 공개 상세(`/api/v1/works/{id}`)에는 `version`이 없습니다 |
-| 이번에 넣지 않은 것 | `reason`·`evidence[]`·변경 기록(#40), 공개 상태·중복 표시(#41) |
+| 이번에 넣지 않은 것 | `reason`·`evidence[]`·변경 기록(#40에서 구현, §3.3 구현 기록), 공개 상태·중복 표시(#41) |
 
 ### 5.2 작가 수정
 
@@ -243,9 +273,9 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/admin/works/{workId}/listings` | 그 작품의 연결 목록과 작품 `version` |
-| POST | `/admin/works/{workId}/listings` | `{version, platformCode, platformWorkId, url, idScope, listingKind, languageCode, ageRatingRaw, ageClass, verifiedAt, note}` (201). `evidence[]`는 #40 |
-| PUT | `/admin/works/{workId}/listings/{listingId}` | `{version, url, idScope, listingKind, languageCode, ageRatingRaw, ageClass, status, movedToListingId, lastVerifiedAt, note}` 전체 교체. 생략한 nullable 필드는 지워집니다 |
-| POST | `/admin/works/{workId}/listings/{listingId}/move` | `{version, newListing{...}}` (201). 새 연결을 만들고 기존 연결을 `MOVED`로 바꿉니다 |
+| POST | `/admin/works/{workId}/listings` | `{version, platformCode, platformWorkId, url, idScope, listingKind, languageCode, ageRatingRaw, ageClass, verifiedAt, note, evidence[], reason?}` (201). `evidence[]` 1개 이상 필수(#40) |
+| PUT | `/admin/works/{workId}/listings/{listingId}` | `{version, url, idScope, listingKind, languageCode, ageRatingRaw, ageClass, status, movedToListingId, lastVerifiedAt, note, evidence[]?, reason}` 전체 교체(`reason` 필수, #40). 생략한 nullable 필드는 지워집니다 |
+| POST | `/admin/works/{workId}/listings/{listingId}/move` | `{version, newListing{..., evidence[]}, reason}` (201). 새 연결을 만들고 기존 연결을 `MOVED`로 바꿉니다 |
 | GET | `/admin/listings/lookup?platformCode=&platformWorkId=` | 이미 연결된 작품이 있는지 확인(중복 검수용) |
 
 > **구현(#39):** 변경 응답은 `{workId, workVersion, listing, movedFrom, warnings}`이고 `warnings`에는 `PLATFORM_MERGING`·`PLATFORM_STATUS_UNKNOWN`·`URL_RULE_UNVERIFIED`·`ID_SCOPE_UNKNOWN`·`AGE_CLASS_UNKNOWN`이 들어갈 수 있습니다. 플랫폼 코드와 외부 작품 ID는 이 요청으로 바꾸지 않습니다(바뀌면 이전). URL이 그대로면 규칙이 바뀌었어도 다시 검사하지 않아 종료·이전 처리를 막지 않습니다. `CLOSED` 플랫폼 연결은 `ACTIVE`로 되돌릴 수 없습니다. 세부는 §3.2 구현 기록.
@@ -265,6 +295,21 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 | POST | `/admin/works/{workId}/field-sources` | 근거 추가(값 변경 없이 근거만 보강할 때) |
 
 - 근거 필수 규칙 [결정]: 작품 등록·`PUT`·연결 추가 요청은 바뀌는 필드마다 `evidence` 하나 이상이 있어야 합니다(`TITLE`·`CREDIT`·`LISTING`). 없으면 400. 설명(`DESCRIPTION`)은 `STAFF`(직접 작성) 또는 `LICENSED`만 허용합니다.
+
+> **구현(#40):** 설계의 `PATCH`를 그대로 썼습니다. 계약은 다음과 같습니다(모두 ADMIN + CSRF, 삭제 API 없음).
+>
+> | 메서드 | 경로 | 요청 | 응답 |
+> |---|---|---|---|
+> | POST | `/admin/works/{workId}/external-ids` | `{version, source, externalId, sourceUrl?, verifiedAt, note?, reason?}` | 201 `{ownerType:"WORK", ownerId, ownerVersion, externalId, warnings}` |
+> | PATCH | `/admin/works/{workId}/external-ids/{id}` | `{version, status, verifiedAt?, note?, reason}` | 200 같은 형태 |
+> | POST·PATCH | `/admin/creators/{creatorId}/external-ids[/{id}]` | 위와 같음(작가 `version`) | `ownerType:"CREATOR"` |
+> | POST | `/admin/works/{workId}/links` | `{version, linkType, url, languageCode, verifiedAt, note?, reason?}` | 201 `{workId, workVersion, link}` |
+> | PATCH | `/admin/works/{workId}/links/{id}` | `{version, status, verifiedAt?, note?, reason}` | 200 같은 형태 |
+> | POST | `/admin/works/{workId}/field-sources` | `{version, evidence:[{field, listingId?, targetRef?, sourceType, sourceRef?, sourceUrl?, verifiedAt, note?}], reason?}` (1~50개) | 201 `{workId, workVersion, fieldSources}` |
+> | PATCH | `/admin/works/{workId}/field-sources/{id}` | `{version, status, note?, reason}` | 200 같은 형태 |
+> | GET | `/admin/change-log?workId=` \| `?creatorId=` \| `?entityType=&entityId=` (`limit` 1~100 기본 50, `beforeId`) | — | `{entries:[{id, entityType, entityId, action, workId, creatorId, before, after, reason, actorId, createdAt}], nextBeforeId}` |
+>
+> 외부 ID·링크의 출처·ID·URL 은 바꾸지 않습니다(바뀌면 새로 추가하고 이전 행을 비활성화). `verifiedAt`을 보내면 다시 확인한 것으로 보고 확인자도 요청자로 바뀝니다. 오류: 409 `EXTERNAL_ID_ALREADY_LINKED`(`existingWorkId` 또는 `existingCreatorId`, `existingExternalIdId`), 409 `WORK_LINK_ALREADY_EXISTS`, 404 `EXTERNAL_ID_NOT_FOUND`·`WORK_LINK_NOT_FOUND`·`FIELD_SOURCE_NOT_FOUND`(다른 작품·작가의 행 포함), 409 버전 충돌. 세부는 §3.3 구현 기록.
 
 ### 5.5 플랫폼 관리
 
@@ -286,6 +331,7 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 - `POST /admin/works` 요청에 선택 필드 `listings[]`, `externalIds[]`, `links[]`, `evidence[]`를 추가합니다. 한 트랜잭션에서 작품과 함께 저장하고, 응답에 `version`을 넣습니다.
 - 등록 요청에 `listings` 또는 `externalIds`가 있으면, 같은 키가 이미 다른 작품에 있을 때 409로 거절되므로 **재시도해도 같은 작품이 두 번 만들어지지 않습니다**(자연 멱등). 키가 없는 등록은 지금처럼 멱등이 아닙니다 → 파일럿 등록은 연결이나 외부 ID를 반드시 함께 보냅니다 [결정].
 - `POST /admin/creators`도 `externalIds[]`를 선택으로 받습니다.
+- **구현(#40):** 위 규칙대로 구현했습니다. 등록 응답은 관리자 상세로 바뀌었습니다. 세부는 §3.3 구현 기록.
 
 ### 5.7 오류 코드 추가
 
@@ -295,11 +341,15 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 | `CREATOR_VERSION_CONFLICT` | 409 | 작가가 다른 곳에서 바뀜 |
 | `PLATFORM_VERSION_CONFLICT` | 409 | 플랫폼 정보가 다른 곳에서 바뀜 |
 | `PLATFORM_LISTING_ALREADY_LINKED` | 409 | 같은 플랫폼 작품이 이미 다른(또는 같은) 작품에 연결됨 |
-| `EXTERNAL_ID_ALREADY_LINKED` | 409 | 같은 외부 ID가 이미 연결됨 |
+| `EXTERNAL_ID_ALREADY_LINKED` | 409 | 같은 출처의 같은 외부 ID가 이미 연결됨(#40) |
+| `EXTERNAL_ID_NOT_FOUND` | 404 | 없는 외부 ID이거나 다른 작품·작가의 외부 ID(#40) |
+| `WORK_LINK_ALREADY_EXISTS` | 409 | 같은 작품에 같은 URL의 공식 링크가 있음(#40) |
+| `WORK_LINK_NOT_FOUND` | 404 | 없는 공식 링크이거나 다른 작품의 링크(#40) |
+| `FIELD_SOURCE_NOT_FOUND` | 404 | 없는 근거이거나 다른 작품의 근거(#40) |
 | `PLATFORM_NOT_FOUND` | 404 | 없는 플랫폼 코드 |
 | `LISTING_NOT_FOUND` | 404 | 없는 연결이거나 다른 작품의 연결(#39에서 추가) |
 
-- #39 구현: `PLATFORM_LISTING_ALREADY_LINKED` 응답의 `error`에 `existingWorkId`·`existingListingId`가 들어갑니다. `EXTERNAL_ID_ALREADY_LINKED`는 #40입니다.
+- #39 구현: `PLATFORM_LISTING_ALREADY_LINKED` 응답의 `error`에 `existingWorkId`·`existingListingId`가 들어갑니다. `EXTERNAL_ID_ALREADY_LINKED`(#40)는 `existingWorkId` 또는 `existingCreatorId`와 `existingExternalIdId`를 담습니다.
 
 ---
 
@@ -404,9 +454,9 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 | S-3 | 버전 범위 | 작품 하나에 버전 하나(하위 리소스 변경도 작품 버전 증가). **#39 연결 API에 적용** | 하위 리소스별 버전 |
 | S-4 | 잘못 만든 작품 처리 | `HIDDEN`·`duplicate_of`(삭제 없음) | 별점·리뷰가 0일 때만 삭제 허용 |
 | S-5 | 중복 작품 상세 URL | 404 | 원본 작품으로 308 안내 |
-| S-6 | 필드 근거 | 등록·수정·연결에 근거 필수 | 권장(선택 입력) |
+| S-6 | 필드 근거 | 등록·수정·연결에 근거 필수. **#40 구현(바뀐 제목·크레딧·줄거리·새 연결)** | 권장(선택 입력) |
 | S-7 | 플랫폼 목록 | DB 코드 테이블 + 초기 10행. **#39 구현(코드·이름만 확정, 허용 호스트 별도 표)** | enum + CHECK |
-| S-8 | 변경 이력 | 공통 `admin_change_log`(JSONB) + 플랫폼 상태 이력 전용 표 | 엔티티별 이력 표 |
+| S-8 | 변경 이력 | 공통 `admin_change_log`(JSONB) + 플랫폼 상태 이력 전용 표. **#40 구현(추가 전용)** | 엔티티별 이력 표 |
 | S-9 | 공개 응답 | 상세에만 `platformLinks`·`officialLinks`·`dataSources` | 목록에도 플랫폼 표시 |
 | S-10 | ID 단위 미확정 연결 | 공개 화면 비표시 | 표시 + "확인 중" |
 | S-11 | 관리자 화면 | 이번에는 API만 | 최소 관리자 화면 |

@@ -56,7 +56,7 @@ class WorkQueryCountTest {
     @BeforeEach
     void setUp() {
         TestDatabaseCleaner.clean(jdbcTemplate, environment);
-        fixtures = new ApiFixtures(mockMvc, objectMapper);
+        fixtures = new ApiFixtures(mockMvc, objectMapper, jdbcTemplate);
         statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         assertThat(statistics.isStatisticsEnabled()).isTrue();
     }

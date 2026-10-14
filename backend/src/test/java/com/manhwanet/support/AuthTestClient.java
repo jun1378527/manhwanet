@@ -97,6 +97,20 @@ public final class AuthTestClient {
         return result;
     }
 
+    /** 세션·CSRF 쿠키·헤더를 붙인 PATCH (#40 상태 변경 API) */
+    public MvcResult patchJson(String path, Object body) throws Exception {
+        if (csrfCookie == null) {
+            fetchCsrf();
+        }
+        MvcResult result = mockMvc.perform(withSession(MockMvcRequestBuilders.patch(path))
+                .cookie(csrfCookie)
+                .header(CSRF_HEADER, csrfCookie.getValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(body))).andReturn();
+        afterResponse(result);
+        return result;
+    }
+
     /** 세션·CSRF 쿠키·헤더를 붙인 DELETE */
     public MvcResult delete(String path) throws Exception {
         if (csrfCookie == null) {

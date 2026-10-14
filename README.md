@@ -166,6 +166,8 @@ Invoke-RestMethod http://127.0.0.1:8080/api/v1/auth/login -Method Post -WebSessi
 # 로그인하면 CSRF 토큰이 바뀌므로 헤더를 다시 만듭니다.
 $h = @{ "X-XSRF-TOKEN" = $s.Cookies.GetCookies("http://127.0.0.1:8080")["XSRF-TOKEN"].Value }
 Invoke-RestMethod http://127.0.0.1:8080/api/v1/admin/creators -Method Post -WebSession $s -Headers $h -ContentType "application/json; charset=utf-8" -Body '{"name":"한서윤"}'
+# 작품 등록에는 제목·크레딧 근거(evidence)가 필요합니다(#40). STAFF 는 관리자가 직접 확인했다는 뜻입니다.
+Invoke-RestMethod http://127.0.0.1:8080/api/v1/admin/works -Method Post -WebSession $s -Headers $h -ContentType "application/json; charset=utf-8" -Body '{"workFormat":"WEBTOON","titles":[{"title":"달빛 기사단","languageCode":"ko","primary":true}],"creators":[{"creatorId":1,"role":"STORY"}],"evidence":[{"field":"TITLE","sourceType":"STAFF","verifiedAt":"2026-10-14T00:00:00Z"},{"field":"CREDIT","sourceType":"STAFF","verifiedAt":"2026-10-14T00:00:00Z"}]}'
 ```
 
 ### 3. Frontend 실행
@@ -238,6 +240,9 @@ cd backend
 | `WorkListingApiIntegrationTest` | 작품 플랫폼 연결: 익명 401·USER 403·CSRF 누락 403, 한 작품 여러 플랫폼, 같은 플랫폼·외부 ID 중복 409(`existingWorkId`·`existingListingId`), 다른 플랫폼 같은 번호 허용, URL 스킴·호스트·패턴·정규화·숨은 문자 거절, 큰 ID·입력 오류, 등급 분류·`UNKNOWN`, `CLOSED` 거절·`MERGING` 경고, 종료·이전·이전 체인, 규칙 변경 뒤 종료, 오래된 version 409, 별점·리뷰·ID 보존 (#39) | O |
 | `PlatformAdminApiIntegrationTest` | 플랫폼 10곳 초기값(상태·약관 미입력), ADMIN·CSRF, 보도는 `UNKNOWN`·종료는 `OFFICIAL`만, 통합 대상·자기 참조·순환·`CLOSED` 대상 거절, 근거 URL, 상태·이력 원자성, `activeListingIds`, URL 규칙·호스트 검증과 위험한 패턴 거절 (#39) | O |
 | `WorkListingConcurrencyTest` | 같은 플랫폼 작품을 두 작품에 동시에 연결하면 하나만 성공, 같은 version 동시 등록, 플랫폼 종료와 연결 등록 경쟁, 작품 version 증가 실패 시 연결 롤백 (#39) | O |
+| `WorkProvenanceApiIntegrationTest` | 작품 외부 ID·공식 링크·필드별 근거·변경 기록 API: 익명 401·USER 403·CSRF 누락 403, 같은 출처 외부 ID 중복 409(`existingWorkId`)·다른 출처 같은 번호 허용·INVALID 로 자리 비우기·되살리기 409, 형식·URL·큰 ID·오래된 version, 링크 URL 검증·플랫폼 호스트 거절·같은 작품 중복 409, 근거 규칙(줄거리 STAFF·LICENSED, LISTING 대상), 철회, 변경 기록 필터·쪽 나누기 (#40) | O |
+| `AdminChangeFlowIntegrationTest` | 작품 등록과 함께 연결·외부 ID·링크·근거 저장과 재시도 409(작품 1개 유지), 근거 필수, 수정 사유·바뀐 필드 근거·같은 내용 무기록, 작가 외부 ID·이름 변경 기록, 연결 생성·상태·이전·평탄화와 플랫폼 상태 기록, 별점·리뷰·ID 보존 (#40) | O |
+| `ProvenanceConcurrencyTest`, `ProvenanceMigrationTest` | 같은 외부 ID 동시 연결은 하나만 성공, 같은 version 하위 리소스 동시 변경, 기록 실패·version 증가 실패 시 등록·변경 전체 롤백 / V8 FK(CASCADE 없음)·부분 유니크·CHECK·복합 FK·변경 기록 추가 전용 (#40) | O |
 | `PlatformListingMigrationTest`, `AgeRatingClassifierTest`, `PlatformUrlsTest` | V7 FK(CASCADE 없음)·유니크·CHECK·복합 FK, 초기 데이터와 테스트 시드 일치, 등급 분류, URL 정규화·패턴 검사 (#39) | O / X |
 | `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |
 | `SessionCookieHttpTest`, `LocalSessionCookieHttpTest` | 실제 HTTP 응답의 쿠키 속성(`__Host-`, local), 세션 흐름, ERROR 디스패치, loopback 바인딩 | O |
@@ -351,15 +356,19 @@ npm run build
 | DELETE | `/api/v1/me/reviews/{workId}?reviewId=&version=` | 내 리뷰 삭제 (204, 리뷰가 없어도 204, 불일치 409) |
 
 - 내 리뷰 POST·PUT·DELETE 와 내 별점 PUT·DELETE 는 헤더 `X-Expected-User-Id`(화면을 렌더링한 사용자 ID, 십진수 문자열)가 필수입니다. 이 요청의 로그인 사용자와 다르면 409 `USER_MISMATCH` 로 아무것도 바꾸지 않습니다(계정 전환 중 다른 계정에 반영되는 것을 막음). 작성자·별점 소유자는 항상 세션 사용자입니다. 값은 일치 확인에만 씁니다.
-| POST | `/api/v1/admin/works` | 작품 등록 (ADMIN) |
-| GET | `/api/v1/admin/works/{workId}` | 관리자용 작품 상세: 공개 상세 + `version` (ADMIN) |
-| PUT | `/api/v1/admin/works/{workId}` | 작품 핵심 정보 전체 교체 `{"version", "workFormat", "originCountry", "description", "titles", "creators"}` (ADMIN, 불일치 409 `WORK_VERSION_CONFLICT`) |
-| POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN) |
-| GET | `/api/v1/admin/creators/{creatorId}` | 관리자용 작가 상세: `version`, `linkedWorkCount` (ADMIN) |
-| PUT | `/api/v1/admin/creators/{creatorId}` | 작가 이름 전체 교체 `{"version", "name", "originalName"}` (ADMIN, 불일치 409 `CREATOR_VERSION_CONFLICT`) |
+| POST | `/api/v1/admin/works` | 작품 등록 (ADMIN). `evidence` 필수(제목·크레딧, 줄거리가 있으면 줄거리), `listings`·`externalIds`·`links`·`reason` 선택. 응답은 관리자용 상세 |
+| GET | `/api/v1/admin/works/{workId}` | 관리자용 작품 상세: 공개 상세 + `version`, `listings`, `externalIds`, `links`, `fieldSources` (ADMIN) |
+| PUT | `/api/v1/admin/works/{workId}` | 작품 핵심 정보 전체 교체 `{"version", "workFormat", "originCountry", "description", "titles", "creators", "evidence", "reason"}` (ADMIN, `reason` 필수, 불일치 409 `WORK_VERSION_CONFLICT`) |
+| POST | `/api/v1/admin/creators` | 작가 등록 (ADMIN). `externalIds`·`reason` 선택. 응답은 관리자용 상세 |
+| GET | `/api/v1/admin/creators/{creatorId}` | 관리자용 작가 상세: `version`, `linkedWorkCount`, `externalIds` (ADMIN) |
+| PUT | `/api/v1/admin/creators/{creatorId}` | 작가 이름 전체 교체 `{"version", "name", "originalName", "reason"}` (ADMIN, `reason` 필수, 불일치 409 `CREATOR_VERSION_CONFLICT`) |
+| POST·PATCH | `/api/v1/admin/works/{workId}/external-ids[/{id}]`, `/api/v1/admin/creators/{creatorId}/external-ids[/{id}]` | 외부 ID 추가(201)·상태 변경(`ACTIVE`·`SUPERSEDED`·`INVALID`). 같은 출처·ID 중복 409 `EXTERNAL_ID_ALREADY_LINKED` (ADMIN, #40) |
+| POST·PATCH | `/api/v1/admin/works/{workId}/links[/{id}]` | 출판사·공식 사이트 링크 추가(201)·상태 변경(`ACTIVE`·`BROKEN`·`REMOVED`) (ADMIN, #40) |
+| POST·PATCH | `/api/v1/admin/works/{workId}/field-sources[/{id}]` | 필드별 근거 추가(201)·철회(`RETRACTED`) (ADMIN, #40) |
+| GET | `/api/v1/admin/change-log?workId=` \| `?creatorId=` \| `?entityType=&entityId=` | 관리 변경 기록 최신순(`limit` 1~100, `beforeId`) (ADMIN, #40) |
 | GET | `/api/v1/admin/platforms` | 플랫폼 10곳: 코드·이름·운영 상태와 근거·URL 규칙·허용 호스트·`version` (ADMIN) |
 | GET·PUT | `/api/v1/admin/platforms/{code}` | 플랫폼 조회·URL 규칙 등 전체 교체 (ADMIN, 불일치 409 `PLATFORM_VERSION_CONFLICT`) |
-| POST | `/api/v1/admin/platforms/{code}/status` | 운영 상태 변경 + 이력 `{"version", "toStatus", "statusBasis", "mergedInto", "effectiveOn", "evidenceUrl", "note"}` (ADMIN) |
+| POST | `/api/v1/admin/platforms/{code}/status` | 운영 상태 변경 + 이력 `{"version", "toStatus", "statusBasis", "mergedInto", "effectiveOn", "evidenceUrl", "note", "reason"}` (ADMIN, `reason` 필수) |
 | GET | `/api/v1/admin/platforms/{code}/status-history` | 상태 변경 이력 최신순 (ADMIN) |
 | GET·POST | `/api/v1/admin/works/{workId}/listings` | 작품 플랫폼 연결 목록·등록 (ADMIN, 작품 `version` 사용, 중복 409 `PLATFORM_LISTING_ALREADY_LINKED`) |
 | PUT | `/api/v1/admin/works/{workId}/listings/{listingId}` | 연결 수정·종료(`ENDED`)·이전 표시(`MOVED`) (ADMIN) |
@@ -370,6 +379,7 @@ npm run build
 - 요청·응답 형식과 검증 규칙은 [docs/work-creator-spec.md](docs/work-creator-spec.md), 인증은 [docs/auth-design-draft.md](docs/auth-design-draft.md), 별점은 [docs/rating-design-draft.md](docs/rating-design-draft.md), 리뷰는 [docs/review-design-draft.md](docs/review-design-draft.md)를 참고하세요.
 - 관리자 수정(PUT)은 GET 으로 받은 `version` 을 그대로 보내야 합니다. 다르면 409 이고 `error.currentVersion` 에 현재 값이 담기며 아무것도 바뀌지 않습니다. 같은 `version` 으로 보낸 내용이 현재와 같으면 `version` 이 오르지 않습니다. 성공한 수정을 이전 `version` 으로 다시 보내면 409 입니다. 제목·크레딧은 한 트랜잭션에서 통째로 바뀌고, 작품·작가 ID와 별점·리뷰는 그대로입니다. 삭제 API 는 없습니다. 규칙은 [docs/work-platform-admin-spec.md](docs/work-platform-admin-spec.md) §5.1·§5.2를 참고하세요.
 - 플랫폼 연결(#39)은 작품 `version` 을 함께 올립니다. URL 은 `https`·플랫폼 허용 호스트·작품 URL 패턴으로만 검사하고 서버가 가져오지 않습니다. 제어 문자 인코딩과 중첩된 `.` 경로는 거절합니다. 등급은 원래 표기를 저장하고, 명확한 18세 미만은 `GENERAL`, 명확한 성인 표기(18·19세 이용가, `19금`, 청소년 이용불가, `청불`)는 `ADULT`, 모호하거나 확인하지 못한 표기는 `UNKNOWN`입니다. `UNKNOWN` 은 일반으로 올리지 않고, 인식하지 못한 표기를 `ADULT` 로 지정하려면 사유 메모가 필요합니다. 연결·플랫폼 삭제 API 는 없고 상태로만 바꿉니다. 연결 정보는 아직 공개 API 에 나오지 않습니다(#42). 규칙은 [docs/work-platform-admin-spec.md](docs/work-platform-admin-spec.md) §3.2 구현 기록을 참고하세요.
+- #40: 관리자 변경은 바뀐 내용과 같은 트랜잭션에서 `admin_change_log`에 기록되고(이전·이후 값, 사유, 관리자 사용자 ID), 실패하면 둘 다 되돌아갑니다. 수정·상태 변경 요청은 `reason` 이 필수이고, 등록은 선택입니다. 새 플랫폼 연결과 작품 등록에는 근거(`evidence`)가 필요하며 줄거리 근거는 직접 작성(`STAFF`)·허락받은 글(`LICENSED`)만 됩니다. 외부 ID 는 같은 출처에서 한 작품(작가)에만 연결되고, `INVALID`(잘못 연결)로 바꾸면 다른 대상에 다시 연결할 수 있습니다. 외부 ID·링크·근거 URL 은 서버가 가져오지 않습니다. 삭제 API 는 없고 상태로 비활성화합니다. 규칙은 [docs/work-platform-admin-spec.md](docs/work-platform-admin-spec.md) §3.3 구현 기록을 참고하세요.
 - 작품 목록·상세 응답에는 `rating: { average, count }`가 있습니다. `average`는 소수 첫째 자리(HALF_UP)이고 별점이 없으면 `null`입니다.
 - POST 등 변경 요청은 `XSRF-TOKEN` 쿠키 값을 `X-XSRF-TOKEN` 헤더로 보내야 합니다. 공개 GET(작품·작가·health) 외의 경로는 로그인이 필요합니다.
 

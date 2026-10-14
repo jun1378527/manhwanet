@@ -1,5 +1,10 @@
 package com.manhwanet.platform.application;
 
+import com.manhwanet.audit.application.AdminChangeLog;
+import com.manhwanet.audit.domain.ChangeAction;
+import com.manhwanet.audit.domain.ChangeEntityType;
+import com.manhwanet.global.admin.AdminInputs;
+
 import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ConstraintViolations;
 import com.manhwanet.global.error.ErrorCode;
@@ -43,6 +48,8 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>종료(CLOSED)·통합(MERGING)은 공식 확인(OFFICIAL)만 허용한다. 보도·미확인은 UNKNOWN 상태에 근거를 남긴다.</li>
  *   <li>플랫폼 상태가 바뀌어도 연결 상태는 자동으로 바꾸지 않는다(관리자가 연결마다 ENDED·MOVED 처리).</li>
  *   <li>증거 URL 은 형식만 검사하고 서버가 가져오지 않는다.</li>
+ *   <li>#40: 규칙·상태 변경은 사유(reason)가 필요하고, 같은 트랜잭션에서 관리 변경 기록(PLATFORM)을 남긴다.
+ *       상태 이력(platform_status_history)은 그대로 쓰고 변경 기록은 그와 별도로 남긴다(명세 S-8).</li>
  * </ul>
  */
 @Service
@@ -55,11 +62,14 @@ public class PlatformAdminService {
 
     private final PlatformRepository platformRepository;
     private final NamedParameterJdbcTemplate jdbc;
+    private final AdminChangeLog changeLog;
     private final Clock clock = Clock.systemUTC();
 
-    public PlatformAdminService(PlatformRepository platformRepository, NamedParameterJdbcTemplate jdbc) {
+    public PlatformAdminService(PlatformRepository platformRepository, NamedParameterJdbcTemplate jdbc,
+            AdminChangeLog changeLog) {
         this.platformRepository = platformRepository;
         this.jdbc = jdbc;
+        this.changeLog = changeLog;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -83,9 +93,9 @@ public class PlatformAdminService {
 
     /** URL 규칙·표시 이름 등 수정(전체 교체). 운영 상태는 changeStatus 로만 바꾼다 */
     @Transactional
-    public PlatformResponse updateRules(String code, UpdatePlatformRequest request) {
+    public PlatformResponse updateRules(String code, UpdatePlatformRequest request, long adminId) {
         code = normalizeCode(code);
-        AdminInputs in = new AdminInputs(new ArrayList<>());
+        AdminInputs in = new AdminInputs();
         Long version = in.version(request.version());
         String name = in.text(request.name(), "name", 50, true);
         String operatorName = in.text(request.operatorName(), "operatorName", 100, false);
@@ -107,6 +117,7 @@ public class PlatformAdminService {
         }
         LocalDate termsCheckedOn = pastDate(request.termsCheckedOn(), "termsCheckedOn", in);
         List<String> hosts = hosts(request.allowedHosts(), in);
+        String reason = in.reason(request.reason(), true);
         in.throwIfAny();
 
         PlatformRow current = platformRepository.lockForUpdate(code)
@@ -152,7 +163,10 @@ public class PlatformAdminService {
         if (updated != 1) {
             throw new IllegalStateException("locked platform was not updated: " + code);
         }
-        return respond(find(code), platformRepository.findAll());
+        PlatformResponse after = respond(find(code), platformRepository.findAll());
+        changeLog.record(ChangeEntityType.PLATFORM, code, ChangeAction.UPDATE, null, null,
+                PlatformResponse.from(current, List.of()), after, reason, adminId);
+        return after;
     }
 
     /**
@@ -163,7 +177,7 @@ public class PlatformAdminService {
     @Transactional
     public PlatformStatusChangeResponse changeStatus(String code, ChangePlatformStatusRequest request, long adminId) {
         code = normalizeCode(code);
-        AdminInputs in = new AdminInputs(new ArrayList<>());
+        AdminInputs in = new AdminInputs();
         Long version = in.version(request.version());
         PlatformStatus toStatus = in.enumValue(request.toStatus(), PlatformStatus.class, "toStatus", true);
         StatusBasis basis = in.enumValue(request.statusBasis(), StatusBasis.class, "statusBasis", true);
@@ -173,6 +187,7 @@ public class PlatformAdminService {
         }
         String evidenceUrl = evidenceUrl(request.evidenceUrl(), in);
         String note = in.text(request.note(), "note", 500, false);
+        String reason = in.reason(request.reason(), true);
         LocalDate effectiveOn = request.effectiveOn();
         if (toStatus != null && basis != null) {
             if ((toStatus == PlatformStatus.CLOSED || toStatus == PlatformStatus.MERGING)
@@ -235,7 +250,14 @@ public class PlatformAdminService {
         if (updated != 1) {
             throw new IllegalStateException("locked platform was not updated: " + code);
         }
-        return statusResponse(find(code), historyId);
+        PlatformStatusChangeResponse response = statusResponse(find(code), historyId);
+        java.util.Map<String, Object> after = new java.util.LinkedHashMap<>();
+        after.put("platform", response.platform());
+        after.put("historyId", historyId);
+        after.put("note", note);
+        changeLog.record(ChangeEntityType.PLATFORM, code, ChangeAction.STATUS_CHANGE, null, null,
+                PlatformResponse.from(current, List.of()), after, reason, adminId);
+        return response;
     }
 
     private PlatformStatusChangeResponse statusResponse(PlatformRow platform, Long historyId) {

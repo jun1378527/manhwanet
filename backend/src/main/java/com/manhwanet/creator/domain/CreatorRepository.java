@@ -38,6 +38,16 @@ public interface CreatorRepository extends JpaRepository<Creator, Long> {
     int updateNames(@Param("id") Long id, @Param("expectedVersion") long expectedVersion,
             @Param("name") String name, @Param("originalName") String originalName);
 
+    /** 작가 하위 리소스(외부 ID) 변경 시 작가 version 만 올린다(#40, 작가당 버전 하나). 잠근 뒤 호출하므로 정상이면 1 */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE creators
+            SET version = version + 1,
+                updated_at = GREATEST(updated_at, now())
+            WHERE id = :id AND version = :expectedVersion
+            """, nativeQuery = true)
+    int bumpVersion(@Param("id") Long id, @Param("expectedVersion") long expectedVersion);
+
     /** 관리자 작가 상세: 이 작가를 크레딧에 둔 작품 수(작품 도메인에 의존하지 않도록 SQL 로 센다) */
     @Query(value = "SELECT count(DISTINCT work_id) FROM work_creators WHERE creator_id = :creatorId", nativeQuery = true)
     long countLinkedWorks(@Param("creatorId") Long creatorId);
