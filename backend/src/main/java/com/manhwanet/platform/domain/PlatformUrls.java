@@ -18,8 +18,10 @@ import java.util.regex.PatternSyntaxException;
  *   <li>스킴은 https 만 허용(소문자로 저장), 사용자 정보 금지, 포트는 없거나 443(제거해 저장), 프래그먼트 금지</li>
  *   <li>호스트(소문자 ASCII)가 그 플랫폼의 허용 호스트 목록에 정확히 있어야 함. 하위 도메인·IP·IDN 은 목록에 없으면 거절</li>
  *   <li>경로·쿼리 정규화: 비ASCII 문자는 퍼센트 인코딩하고, 비예약 문자(영문·숫자·-._~)의 퍼센트 인코딩만 한 번 푼다.
- *       나머지는 16진수 대문자로 둔다. 반복해서 풀지 않는다. "."·".." 경로 조각, 제어 문자 인코딩, 역슬래시 인코딩,
- *       경로의 슬래시 인코딩, %25 를 최대 두 겹까지 풀었을 때 나오는 . / \ 제어 문자는 거절한다</li>
+     *       나머지는 16진수 대문자로 둔다. 반복해서 풀지 않는다. "."·".." 경로 조각, 제어 문자 인코딩, 역슬래시 인코딩,
+     *       경로의 슬래시 인코딩, %25 를 최대 두 겹까지 풀었을 때 나오는 . / \ 제어 문자는 거절한다.
+     *       UTF-8 로 인코딩된 공백·제어·서식 문자(%20, %E2%80%8B 등)도 거절한다. %25 는 최대 두 겹까지 풀어 같은 문자를 본다.
+     *       한글·일본어는 허용한다. 금지 문자가 아닌 잘못된 UTF-8(%FF, 이어지지 않은 %C3)은 이 규칙으로 거절하지 않는다</li>
  *   <li>플랫폼에 작품 URL 패턴이 있으면 정규화한 URL 전체가 패턴과 일치해야 하고, 패턴의 (?&lt;id&gt;...) 그룹은 platformWorkId 와 같아야 함.
  *       역참조·전후방 탐색은 패턴에 쓸 수 없다. 매칭은 charAt 호출 횟수와 시간으로 끊는다. 이 제한은 스레드를 중단하지 않는다</li>
  * </ol>
@@ -234,12 +236,115 @@ public final class PlatformUrls {
      * 경로의 %2F 는 일부 서버가 슬래시로 해석하므로 거절한다. 쿼리의 %2F 는 값으로 남긴다.
      */
     private static boolean hasDangerousEncoding(String value, boolean path) {
+        if (hasEncodedInvisible(value)) {
+            return true;
+        }
         for (int i = 0; i < value.length(); i++) {
             if (value.charAt(i) == '%' && dangerousByte(value, i + 1, 0, path)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * 퍼센트 인코딩이 원문에서 금지하는 공백·제어·서식 문자면 거절한다.
+     * 한 바이트(%20, %7F)와 UTF-8(%E2%80%8B, %C2%A0)을 같은 isInvisible 로 본다.
+     * 너무 긴 인코딩으로 쓴 같은 문자도 본다. %25 는 기존 이중 인코딩 한도와 같이 최대 두 겹만 푼다.
+     * 한글·일본어 코드 포인트는 그대로 둔다. 금지 문자가 아닌 잘못된 UTF-8 은 거절하지 않는다.
+     */
+    private static boolean hasEncodedInvisible(String value) {
+        if (encodedCodePointIsInvisible(value)) {
+            return true;
+        }
+        String once = unwrapPercent25(value);
+        if (!once.equals(value) && encodedCodePointIsInvisible(once)) {
+            return true;
+        }
+        String twice = unwrapPercent25(once);
+        return !twice.equals(once) && encodedCodePointIsInvisible(twice);
+    }
+
+    /** %25 한 겹만 % 로 바꾼다. 다른 퍼센트 인코딩은 풀지 않는다 */
+    private static String unwrapPercent25(String value) {
+        StringBuilder out = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            if (i + 2 < value.length() && value.charAt(i) == '%' && value.charAt(i + 1) == '2'
+                    && value.charAt(i + 2) == '5') {
+                out.append('%');
+                i += 2;
+            } else {
+                out.append(value.charAt(i));
+            }
+        }
+        return out.toString();
+    }
+
+    private static boolean encodedCodePointIsInvisible(String value) {
+        for (int i = 0; i < value.length(); ) {
+            int[] decoded = decodePercentUtf8(value, i);
+            if (decoded != null) {
+                if (isInvisible(decoded[0])) {
+                    return true;
+                }
+                i += decoded[1];
+                continue;
+            }
+            int single = percentByte(value, i);
+            if (single >= 0 && isInvisible(single)) {
+                return true;
+            }
+            i++;
+        }
+        return false;
+    }
+
+    /**
+     * [코드 포인트, 소비한 문자 수]. 다바이트 UTF-8 퍼센트 인코딩이 아니면 null.
+     * 이어지는 바이트가 부족한 잘못된 UTF-8 도 null 이다. 너무 긴 ASCII 인코딩(C0·C1)은 코드 포인트를 돌려준다.
+     */
+    private static int[] decodePercentUtf8(String value, int start) {
+        int lead = percentByte(value, start);
+        if (lead < 0xC0 || lead > 0xF4) {
+            return null;
+        }
+        int count;
+        int cp;
+        if (lead <= 0xDF) {
+            count = 2;
+            cp = lead & 0x1F;
+        } else if (lead <= 0xEF) {
+            count = 3;
+            cp = lead & 0x0F;
+        } else {
+            count = 4;
+            cp = lead & 0x07;
+        }
+        int index = start + 3;
+        for (int n = 1; n < count; n++) {
+            int cont = percentByte(value, index);
+            if (cont < 0 || (cont & 0xC0) != 0x80) {
+                return null;
+            }
+            cp = (cp << 6) | (cont & 0x3F);
+            index += 3;
+        }
+        if (cp > 0x10FFFF) {
+            return null;
+        }
+        return new int[] {cp, index - start};
+    }
+
+    private static int percentByte(String value, int at) {
+        if (at < 0 || at + 2 >= value.length() || value.charAt(at) != '%') {
+            return -1;
+        }
+        char high = value.charAt(at + 1);
+        char low = value.charAt(at + 2);
+        if (!isHex(high) || !isHex(low)) {
+            return -1;
+        }
+        return Integer.parseInt(value.substring(at + 1, at + 3), 16);
     }
 
     private static boolean dangerousByte(String value, int hexAt, int depth, boolean path) {

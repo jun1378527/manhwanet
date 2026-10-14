@@ -92,9 +92,9 @@ ALTER TABLE creators
 | 허용 호스트 | `platform_hosts(platform_code, host)`, 호스트는 전체에서 유일(`uk_platform_hosts_host`)하고 소문자 DNS 이름만 허용합니다. URL 호스트는 이 목록과 **정확히 같아야** 합니다(하위 도메인 자동 허용 없음) |
 | 초기 데이터 | 10곳의 **코드·표시 이름**이 확정값입니다. 운영 상태 `UNKNOWN`·근거 `UNVERIFIED`·기본 ID 단위 `UNKNOWN`·운영사·약관 확인일은 비워 둡니다. URL 규칙은 공개 작품 주소를 관찰한 7곳만 `OBSERVED` + 확인일(2026-10-11, 네이버웹툰은 2026-10-12 사용자 확인 예시 `titleId=651673`)입니다. 투믹스·코미코·미스터블루는 패턴 없이 `UNVERIFIED`입니다. 미스터블루는 웹툰 경로가 조사 문서의 `detail/wt_`와 성인 리다이렉트에서 본 `wt_`만으로 갈리고, 만화 `C{9}`는 수집 설계 §8.4에서 PROBE 전이라 한 패턴을 `OBSERVED`로 두지 않았습니다. 호스트(`www.mrblue.com`, `m.mrblue.com`)는 남깁니다. 그 외 호스트 변형은 확인 뒤 관리자 API로 추가합니다 |
 | URL 패턴 | 이름 있는 그룹 `(?<id>...)` 정확히 하나가 필요하고, 그 값이 `platformWorkId`와 같아야 합니다. 역참조(`\1`, `\k<name>`, `\k'name'`)·전후방 탐색은 거절합니다. 매칭은 잠금 밖에서 하고, `charAt` 10만 회 또는 50ms를 넘으면 거절합니다. 이 한계는 정규식 엔진이 `charAt`을 부르는 동안 그 매칭을 끝냅니다. `Thread.interrupt`는 하지 않으며, `charAt`을 부르지 않는 경로는 멈추지 않습니다. 입력 길이(500)와 패턴 길이(300), 역참조 금지가 그 간격을 줄입니다 |
-| URL 검증·정규화 | `https`만, 사용자 정보·443 이외 포트·`#` 조각 금지, 호스트 소문자·기본 포트 제거. 비 ASCII는 퍼센트 인코딩하고, 예약되지 않은 문자의 퍼센트 인코딩(`%63` → `c`)만 **한 번** 풉니다. 반복해서 풀지 않습니다. 제어 문자 인코딩(`%00`, `%0D%0A` 등), `%5C`, 경로의 `%2F`, `%25`를 최대 두 겹 안쪽까지 봤을 때의 `.` `/` `\` 제어 문자는 거절합니다. 세 겹을 넘는 `%25`는 더 풀지 않습니다. `.`·`..` 경로 조각과 공백·제로폭 문자도 거절합니다. 설계의 "추적 쿼리 제거"는 하지 않고, 패턴에 맞지 않는 쿼리는 400입니다. **서버는 URL을 가져오지 않습니다** |
+| URL 검증·정규화 | `https`만, 사용자 정보·443 이외 포트·`#` 조각 금지, 호스트 소문자·기본 포트 제거. 비 ASCII는 퍼센트 인코딩하고, 예약되지 않은 문자의 퍼센트 인코딩(`%63` → `c`)만 **한 번** 풉니다. 반복해서 풀지 않습니다. 제어 문자 인코딩(`%00`, `%0D%0A` 등), `%5C`, 경로의 `%2F`, `%25`를 최대 두 겹 안쪽까지 봤을 때의 `.` `/` `\` 제어 문자는 거절합니다. 세 겹을 넘는 `%25`는 더 풀지 않습니다. `.`·`..` 경로 조각과 공백·제로폭 문자도 거절합니다. UTF-8로 퍼센트 인코딩된 공백·제어·서식 문자(`%20`, `%E2%80%8B`, `%C2%A0`)도 원문과 같이 거절합니다. `%25`는 최대 두 겹까지 풀어 같은 문자를 봅니다. 한글·일본어 URL은 허용합니다. 금지 문자가 아닌 잘못된 UTF-8(`%FF`, 이어지지 않은 `%C3`)은 이 규칙으로 거절하지 않습니다. 설계의 "추적 쿼리 제거"는 하지 않고, 패턴에 맞지 않는 쿼리는 400입니다. **서버는 URL을 가져오지 않습니다** |
 | `work_platform_listings` | FK에 CASCADE 없음. `UNIQUE(platform_code, platform_work_id)`, `platform_work_id`는 보이는 ASCII 1~100자(CHECK). 이전 대상은 복합 FK `(moved_to_listing_id, work_id) → (id, work_id)`로 **같은 작품의 연결만** 가리킵니다. `status = MOVED` ⇔ 이전 대상 있음, 자기 참조 금지, `age_class` 3값, 확인 시각 순서 CHECK |
-| 등급 | `ageRatingRaw`를 그대로 저장하고 `ageClass`를 분류합니다. N세(뒤에 미만·이하·이상이 없을 때, N<18)·전체 → `GENERAL`. 18·19세 이용가, `19금`, `청소년 이용불가`, `청불`, `18+`·`19+`·`R18` → `ADULT`. `19금`은 19세 이용가의 공개 약칭이고, `청불`은 앞뒤에 다른 한글이 없을 때의 `청소년 이용불가` 약칭입니다. **"성인" 부분 문자열만으로는 ADULT가 되지 않습니다.** `18세 미만`, `미성인`, `성인 아님`처럼 모호한 표기는 `UNKNOWN`입니다. 신호가 겹치거나 표기가 없거나 인식하지 못하면 `UNKNOWN`이며 일반으로 올리지 않습니다. 명시한 `ageClass`가 분류와 다르면 400, 원래 표기 없이 `GENERAL`·`ADULT`면 400, **인식하지 못한 표기로 `GENERAL`을 지정해도 400**입니다. 인식하지 못한 표기를 `ADULT`로 지정하려면 사유(`note`)가 필요하고, 그 메모를 연결에 남깁니다 |
+| 등급 | `ageRatingRaw`를 그대로 저장하고 `ageClass`를 분류합니다. N세(뒤에 미만·이하·이상이 없을 때, N<18)·전체 → `GENERAL`. 18·19세 이용가, `19금`, `청소년 이용불가`, `청불`, `18+`·`19+`·`R18` → `ADULT`. `19금`은 19세 이용가의 공개 약칭이고, `청불`은 앞뒤에 다른 한글이 없을 때의 `청소년 이용불가` 약칭입니다. **"성인" 부분 문자열만으로는 ADULT가 되지 않습니다.** `18세 미만`, `미성인`, `성인 아님`, `전체 이용불가`, `청소년 이용불가 아님`, `18세 이용가 아님`처럼 부정·모호한 표기는 `UNKNOWN`입니다. `전체 이용가`, `청소년 이용불가`, `18세 이용가`는 그대로 분류합니다. 신호가 겹치거나 표기가 없거나 인식하지 못하면 `UNKNOWN`이며 일반으로 올리지 않습니다. 명시한 `ageClass`가 분류와 다르면 400, 원래 표기 없이 `GENERAL`·`ADULT`면 400, **인식하지 못한 표기로 `GENERAL`을 지정해도 400**입니다. 인식하지 못한 표기를 `ADULT`로 지정하려면 사유(`note`)가 필요하고, 그 메모를 연결에 남깁니다 |
 | 버전 | 연결 변경은 S-3대로 **작품 `version`**을 요청으로 받고 올립니다(#38 작품 수정과 같은 버전). 플랫폼 변경은 `platforms.version`, 불일치는 409 `PLATFORM_VERSION_CONFLICT` |
 | 잠금 순서 | 연결 등록·수정·이전: 플랫폼 `FOR SHARE` → 작품 `FOR NO KEY UPDATE`. 플랫폼 상태·규칙 변경: 플랫폼 `FOR NO KEY UPDATE`. 따라서 종료 처리와 연결 등록이 겹치면 한쪽이 기다리고, 먼저 커밋된 연결은 `activeListingCount`에 포함됩니다. id 목록은 최대 100개입니다. 통합 대상 지정은 순환을 동시에 만들지 못하게 플랫폼 10행을 코드 순으로 잠급니다 |
 | 원자성 | 상태 이력 INSERT와 플랫폼 UPDATE, 연결 INSERT·UPDATE와 작품 `version` 증가, 이전(새 연결 + 이전 연결 `MOVED`)은 각각 한 트랜잭션입니다. 중간 실패 시 모두 되돌아갑니다(트리거로 실패를 주입해 검증) |
@@ -283,7 +283,7 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 - `UNIQUE(platform_code, platform_work_id)` 위반은 **409 `PLATFORM_LISTING_ALREADY_LINKED`**(관리자 응답에만 기존 작품 ID 포함). 다른 작품에 이미 붙은 플랫폼 작품을 새 작품으로 만들지 못하게 합니다.
 - URL이 플랫폼 `work_url_pattern`에 맞지 않으면 400 `INVALID_INPUT`(`fieldErrors: url`).
 - `CLOSED` 플랫폼에는 새 연결을 만들 수 없습니다(400). `MERGING` 플랫폼은 허용하되 응답에 경고 필드를 넣습니다.
-- 등급: 연결에 `ageRatingRaw`(원래 표기)와 `ageClass`를 기록합니다. 명확한 18세 미만 표기(전체·7·12·15세)는 `GENERAL`, 명확한 성인 표기(18·19세 이용가, `19금`, `청소년 이용불가`, `청불`, `18+`·`19+`·`R18`)는 `ADULT`입니다. `성인`이라는 낱말만으로, 또는 `18세 미만`·`미성인`·`성인 아님`처럼 모호한 표기로는 자동 분류하지 않고 `UNKNOWN`으로 둡니다. **세 값 모두 등록할 수 있습니다.** `UNKNOWN`은 `GENERAL`로 자동 처리하지 않고, 인식하지 못한 표기를 `GENERAL`로 지정하면 400입니다. 인식하지 못한 표기를 `ADULT`로 지정하려면 `note`에 사유를 적어야 합니다. 공개 화면에 `ADULT`·`UNKNOWN`을 어떻게 보일지는 공개 표시 정책(수집 설계 §6.3)에서 정하며, 그 전에는 공개하지 않습니다.
+- 등급: 연결에 `ageRatingRaw`(원래 표기)와 `ageClass`를 기록합니다. 명확한 18세 미만 표기(전체·7·12·15세)는 `GENERAL`, 명확한 성인 표기(18·19세 이용가, `19금`, `청소년 이용불가`, `청불`, `18+`·`19+`·`R18`)는 `ADULT`입니다. `성인`이라는 낱말만으로, 또는 `18세 미만`·`미성인`·`성인 아님`·`전체 이용불가`·`청소년 이용불가 아님`·`18세 이용가 아님`처럼 부정·모호한 표기로는 자동 분류하지 않고 `UNKNOWN`으로 둡니다. `전체 이용가`·`청소년 이용불가`·`18세 이용가`는 그대로 분류합니다. **세 값 모두 등록할 수 있습니다.** `UNKNOWN`은 `GENERAL`로 자동 처리하지 않고, 인식하지 못한 표기를 `GENERAL`로 지정하면 400입니다. 인식하지 못한 표기를 `ADULT`로 지정하려면 `note`에 사유를 적어야 합니다. 공개 화면에 `ADULT`·`UNKNOWN`을 어떻게 보일지는 공개 표시 정책(수집 설계 §6.3)에서 정하며, 그 전에는 공개하지 않습니다.
 - 연결 이전(플랫폼 통합·슬러그 변경): 새 연결을 만든 뒤 이전 연결을 `MOVED`(+`movedToListingId`)로 바꿉니다. 한 요청으로 처리하는 `POST /admin/works/{workId}/listings/{listingId}/move`(`{version, newListing{...}}`)를 둡니다.
 
 ### 5.4 외부 ID·공식 링크·근거
@@ -341,7 +341,7 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 | `CREATOR_VERSION_CONFLICT` | 409 | 작가가 다른 곳에서 바뀜 |
 | `PLATFORM_VERSION_CONFLICT` | 409 | 플랫폼 정보가 다른 곳에서 바뀜 |
 | `PLATFORM_LISTING_ALREADY_LINKED` | 409 | 같은 플랫폼 작품이 이미 다른(또는 같은) 작품에 연결됨 |
-| `EXTERNAL_ID_ALREADY_LINKED` | 409 | 같은 출처의 같은 외부 ID가 이미 연결됨(#40) |
+| `EXTERNAL_ID_ALREADY_LINKED` | 409 | 같은 출처의 같은 외부 ID가 이미 연결됨(#40). 충돌 직후 그 행이 `INVALID`가 되어 보이지 않으면 같은 409를 연결 ID 없이 반환합니다(#60). `Retry-After`는 없고 서버 장애(503)와 구분됩니다. 이 헤더가 재전송을 일으키지는 않습니다. 공통 클라이언트는 `INVALID_CSRF_TOKEN`일 때만 변경 요청을 한 번 다시 보냅니다. 실패한 변경·version·기록은 롤백됩니다 |
 | `EXTERNAL_ID_NOT_FOUND` | 404 | 없는 외부 ID이거나 다른 작품·작가의 외부 ID(#40) |
 | `WORK_LINK_ALREADY_EXISTS` | 409 | 같은 작품에 같은 URL의 공식 링크가 있음(#40) |
 | `WORK_LINK_NOT_FOUND` | 404 | 없는 공식 링크이거나 다른 작품의 링크(#40) |
@@ -349,7 +349,7 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 | `PLATFORM_NOT_FOUND` | 404 | 없는 플랫폼 코드 |
 | `LISTING_NOT_FOUND` | 404 | 없는 연결이거나 다른 작품의 연결(#39에서 추가) |
 
-- #39 구현: `PLATFORM_LISTING_ALREADY_LINKED` 응답의 `error`에 `existingWorkId`·`existingListingId`가 들어갑니다. `EXTERNAL_ID_ALREADY_LINKED`(#40)는 `existingWorkId` 또는 `existingCreatorId`와 `existingExternalIdId`를 담습니다.
+- #39 구현: `PLATFORM_LISTING_ALREADY_LINKED` 응답의 `error`에 `existingWorkId`·`existingListingId`가 들어갑니다. `EXTERNAL_ID_ALREADY_LINKED`(#40)는 연결이 보이면 `existingWorkId` 또는 `existingCreatorId`와 `existingExternalIdId`를 담습니다. 충돌 직후 그 행이 `INVALID`가 되면 세 필드를 생략합니다(#60). 상태 코드는 409이고 `Retry-After`는 없습니다. `Retry-After`는 재전송을 일으키지 않습니다. 공통 클라이언트(`apiRequest`)는 `INVALID_CSRF_TOKEN`일 때만 변경 요청을 한 번 다시 보냅니다.
 
 ---
 

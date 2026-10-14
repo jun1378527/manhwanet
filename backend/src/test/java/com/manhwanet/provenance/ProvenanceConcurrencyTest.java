@@ -23,8 +23,12 @@ import com.manhwanet.work.application.WorkService;
 import com.manhwanet.work.dto.CreateWorkRequest.CreditRequest;
 import com.manhwanet.work.dto.CreateWorkRequest.TitleRequest;
 import com.manhwanet.work.dto.CreateWorkRequest;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import javax.sql.DataSource;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -64,6 +68,9 @@ class ProvenanceConcurrencyTest {
     private JdbcTemplate jdbc;
 
     @Autowired
+    private DataSource dataSource;
+
+    @Autowired
     private Environment environment;
 
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
@@ -85,6 +92,8 @@ class ProvenanceConcurrencyTest {
         executor.shutdownNow();
         dropTriggers();
         ExternalIdStatusChanger.beforeConflictingUpdate = () -> {
+        };
+        ExternalIdStatusChanger.beforeConflictLookup = () -> {
         };
     }
 
@@ -161,6 +170,88 @@ class ProvenanceConcurrencyTest {
     @Test
     void reactivatingTwoInvalidCreatorExternalIdsReturnsConflictWithIds() throws Exception {
         reactivatePair(ExternalIdOwner.CREATOR, 8_700_000);
+    }
+
+    /**
+     * 재활성화 충돌 직후, 성공한 행이 INVALID 가 된 다음 충돌 정보를 조회한다.
+     * 조회 결과가 무엇인지와, 실패한 쪽의 변경·version·기록이 롤백되는지를 본다.
+     */
+    @Test
+    void lookupAfterWinnerIsInvalidatedRollsBackTheLoser() throws Exception {
+        lookupAfterHolderDisappears(ExternalIdOwner.WORK, "Q8800001");
+        lookupAfterHolderDisappears(ExternalIdOwner.CREATOR, "Q8800002");
+    }
+
+    private void lookupAfterHolderDisappears(ExternalIdOwner owner, String externalId) throws Exception {
+        long ownerA = newOwner(owner, "사라진충돌A");
+        long ownerB = newOwner(owner, "사라진충돌B");
+        ExternalIdStatusChanger.beforeConflictingUpdate = () -> {
+        };
+        ExternalIdStatusChanger.beforeConflictLookup = () -> {
+        };
+        Held invalidA = invalidate(owner, ownerA, externalId);
+        Held invalidB = invalidate(owner, ownerB, externalId);
+        CyclicBarrier passedCheck = new CyclicBarrier(2);
+        ExternalIdStatusChanger.beforeConflictingUpdate = () -> {
+            try {
+                passedCheck.await(10, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        };
+        ExternalIdStatusChanger.beforeConflictLookup = () -> invalidateCommittedHolder(owner, externalId);
+        try {
+            Future<Object> first = executor.submit(() -> reactivateAny(owner, invalidA));
+            Future<Object> second = executor.submit(() -> reactivateAny(owner, invalidB));
+            List<Object> results = List.of(first.get(15, TimeUnit.SECONDS), second.get(15, TimeUnit.SECONDS));
+
+            assertThat(results).filteredOn(ExternalIdMutationResponse.class::isInstance).hasSize(1);
+            Object loserResult = results.stream().filter(result -> !(result instanceof ExternalIdMutationResponse))
+                    .findFirst().orElseThrow();
+            assertThat(loserResult).as(owner + " 충돌 조회").isInstanceOf(ExternalIdAlreadyLinkedException.class);
+            ExternalIdAlreadyLinkedException vanished = (ExternalIdAlreadyLinkedException) loserResult;
+            assertThat(vanished.getErrorCode()).isEqualTo(ErrorCode.EXTERNAL_ID_ALREADY_LINKED);
+            assertThat(vanished.getExistingWorkId()).isNull();
+            assertThat(vanished.getExistingCreatorId()).isNull();
+            assertThat(vanished.getExistingExternalIdId()).isNull();
+
+            ExternalIdMutationResponse success = (ExternalIdMutationResponse) results.stream()
+                    .filter(ExternalIdMutationResponse.class::isInstance).findFirst().orElseThrow();
+            Held winner = success.ownerId() == invalidA.ownerId ? invalidA : invalidB;
+            Held loser = winner == invalidA ? invalidB : invalidA;
+            assertThat(ownerVersion(owner, loser.ownerId)).isEqualTo(loser.version);
+            assertThat(changeLogCount(owner, loser.ownerId)).isEqualTo(loser.logs);
+            assertThat(jdbc.queryForObject("SELECT status FROM " + owner.table() + " WHERE id = ?", String.class,
+                    loser.rowId)).isEqualTo("INVALID");
+            assertThat(ownerVersion(owner, winner.ownerId)).isEqualTo(winner.version + 1);
+            assertThat(jdbc.queryForObject("SELECT status FROM " + owner.table() + " WHERE id = ?", String.class,
+                    winner.rowId)).isEqualTo("INVALID");
+            assertThat(jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM " + owner.table() + " WHERE external_id = ? AND status <> 'INVALID'",
+                    Integer.class, externalId)).isZero();
+        } finally {
+            ExternalIdStatusChanger.beforeConflictingUpdate = () -> {
+            };
+            ExternalIdStatusChanger.beforeConflictLookup = () -> {
+            };
+        }
+    }
+
+    /** 성공한 연결을 다른 커넥션에서 INVALID 로 커밋한다. 실패한 트랜잭션의 연결은 쓰지 않는다 */
+    private void invalidateCommittedHolder(ExternalIdOwner owner, String externalId) {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(true);
+            try (PreparedStatement statement = connection.prepareStatement("UPDATE " + owner.table()
+                    + " SET status = 'INVALID' WHERE external_id = ? AND status <> 'INVALID'")) {
+                statement.setString(1, externalId);
+                int updated = statement.executeUpdate();
+                if (updated != 1) {
+                    throw new IllegalStateException("holder update count " + updated);
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Test
@@ -275,6 +366,14 @@ class ProvenanceConcurrencyTest {
         try {
             return updateStatus(owner, held.ownerId, held.rowId, held.version, "ACTIVE");
         } catch (ExternalIdAlreadyLinkedException e) {
+            return e;
+        }
+    }
+
+    private Object reactivateAny(ExternalIdOwner owner, Held held) {
+        try {
+            return updateStatus(owner, held.ownerId, held.rowId, held.version, "ACTIVE");
+        } catch (RuntimeException e) {
             return e;
         }
     }

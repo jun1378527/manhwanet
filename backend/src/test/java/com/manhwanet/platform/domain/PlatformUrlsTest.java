@@ -75,6 +75,44 @@ class PlatformUrlsTest {
                 .isTrue();
     }
 
+    @Test
+    void rejectsPercentEncodedZeroWidthAndAllowsHangulAndJapanese() {
+        assertThat(PlatformUrls.validateGeneral("https://example.com/a%E2%80%8Bb").ok()).isFalse();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/a%e2%80%8bb").ok()).isFalse();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/a\u200Bb").ok()).isFalse();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/path?q=%E2%80%8B").ok()).isFalse();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/만화").ok()).isTrue();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/%EB%A7%8C%ED%99%94").ok()).isTrue();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/漫画").ok()).isTrue();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/%E6%BC%AB%E7%94%BB").ok()).isTrue();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/あいう").ok()).isTrue();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/%E3%81%82%E3%81%84%E3%81%86").ok()).isTrue();
+    }
+
+    @Test
+    void rejectsEncodedWhitespaceAndControlsLikeRawText() {
+        for (String url : List.of(
+                "https://example.com/a%20b",
+                "https://example.com/a%09b",
+                "https://example.com/a%7Fb",
+                "https://example.com/a%C2%A0b",
+                "https://example.com/a%E2%80%A8b",
+                "https://example.com/a%C0%80b",
+                "https://example.com/a%2520b",
+                "https://example.com/a%25E2%2580%258Bb",
+                "https://example.com/a?q=b%20c",
+                "https://example.com/a b",
+                "https://example.com/a\tb")) {
+            assertThat(PlatformUrls.validateGeneral(url).ok()).as(url).isFalse();
+        }
+        // 금지 문자가 아닌 잘못된 UTF-8 은 거절하지 않는다. 잘린 %E2%80 은 남은 %80 이 제어 문자라 거절된다.
+        assertThat(PlatformUrls.validateGeneral("https://example.com/a%FF").ok()).isTrue();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/a%C3").ok()).isTrue();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/a%E2%80").ok()).isFalse();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/%EB%A7%8C%ED%99%94").ok()).isTrue();
+        assertThat(PlatformUrls.validateGeneral("https://example.com/%E3%81%82").ok()).isTrue();
+    }
+
     private static void assertOk(String url, List<String> hosts, String pattern, String id) {
         assertThat(PlatformUrls.validate(url, hosts, pattern, id).ok()).as(url).isTrue();
     }

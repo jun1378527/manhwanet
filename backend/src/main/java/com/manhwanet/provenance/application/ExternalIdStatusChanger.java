@@ -37,6 +37,13 @@ public class ExternalIdStatusChanger {
     public static volatile Runnable beforeConflictingUpdate = () -> {
     };
 
+    /**
+     * 유니크 충돌을 잡은 뒤, 이미 커밋된 연결을 조회하기 전.
+     * 운영에서는 아무것도 하지 않는다. 테스트가 성공한 행을 그 사이에 INVALID 로 바꾼다.
+     */
+    public static volatile Runnable beforeConflictLookup = () -> {
+    };
+
     private final ExternalIdRepository repository;
     private final ProvenanceWriter writer;
     private final AdminChangeLog changeLog;
@@ -88,6 +95,7 @@ public class ExternalIdStatusChanger {
                 // 제약 위반으로 이 트랜잭션은 더 이상 조회할 수 없다. 이미 커밋된 연결은 새 읽기 트랜잭션에서 찾는다(#57).
                 // 다른 무결성 오류는 여기서 삼키지 않고, 호출 트랜잭션이 변경·version·기록과 함께 롤백된다.
                 ExternalIdDraft key = new ExternalIdDraft(current.source(), current.externalId(), null, verifiedAt, null);
+                beforeConflictLookup.run();
                 throw writer.conflictCommittedElsewhere(owner, key);
             }
             throw e;

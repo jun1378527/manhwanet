@@ -89,13 +89,18 @@ public class ProvenanceWriter {
         return linked(owner, draft);
     }
 
-    /** 이미 쓰이고 있는 출처·ID 의 409. 충돌 행이 보이지 않으면(동시에 지워질 수 없으므로) 프로그래밍 오류 */
+    /**
+     * 이미 쓰이고 있는 출처·ID 의 409.
+     * 충돌 직후 그 행이 INVALID 가 되면 부분 인덱스는 행을 보여 주지 않는다. 그때는 연결 ID 없이
+     * 같은 409 를 던진다. 503 이 아니므로 서버 장애와 구분되고, Retry-After 도 붙이지 않는다.
+     * 그 헤더가 요청을 다시 보내지는 않는다. 이 요청의 변경·version·기록은 호출 트랜잭션이 롤백한다.
+     */
     public ExternalIdAlreadyLinkedException linked(ExternalIdOwner owner, ExternalIdDraft draft) {
-        ExternalIdRow holder = externalIdRepository.findHolder(owner, draft.source(), draft.externalId())
-                .orElseThrow(() -> new IllegalStateException("conflicting external id not visible"));
-        return owner == ExternalIdOwner.WORK
-                ? new ExternalIdAlreadyLinkedException(holder.ownerId(), null, holder.id())
-                : new ExternalIdAlreadyLinkedException(null, holder.ownerId(), holder.id());
+        return externalIdRepository.findHolder(owner, draft.source(), draft.externalId())
+                .map(holder -> owner == ExternalIdOwner.WORK
+                        ? new ExternalIdAlreadyLinkedException(holder.ownerId(), null, holder.id())
+                        : new ExternalIdAlreadyLinkedException(null, holder.ownerId(), holder.id()))
+                .orElseGet(() -> new ExternalIdAlreadyLinkedException(null, null, null));
     }
 
     /** 공식 링크 저장 + WORK_LINK CREATE 기록. 같은 작품에 같은 URL 이 있으면 409 WORK_LINK_ALREADY_EXISTS */

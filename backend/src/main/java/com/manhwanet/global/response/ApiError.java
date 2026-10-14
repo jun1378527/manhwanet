@@ -9,7 +9,8 @@ import java.util.List;
  * <ul>
  *   <li>currentVersion: 버전 충돌(409)의 현재 버전</li>
  *   <li>existingWorkId·existingListingId: 플랫폼 작품 중복 연결(409 PLATFORM_LISTING_ALREADY_LINKED, 관리자 API 만)</li>
- *   <li>existingWorkId 또는 existingCreatorId·existingExternalIdId: 외부 ID 중복 연결(409 EXTERNAL_ID_ALREADY_LINKED, #40)</li>
+ *   <li>existingWorkId 또는 existingCreatorId·existingExternalIdId: 외부 ID 중복 연결(409 EXTERNAL_ID_ALREADY_LINKED, #40).
+ *       연결을 특정할 수 없으면 세 필드를 생략한다(#60)</li>
  * </ul>
  */
 @JsonInclude(JsonInclude.Include.NON_EMPTY)
@@ -34,7 +35,7 @@ public record ApiError(String code, String message, List<FieldError> fieldErrors
     }
 
     public static ApiError externalIdLinked(ErrorCode errorCode, String message, Long existingWorkId,
-            Long existingCreatorId, long existingExternalIdId) {
+            Long existingCreatorId, Long existingExternalIdId) {
         return new ApiError(errorCode.name(), message, List.of(), null, existingWorkId, null, existingCreatorId,
                 existingExternalIdId);
     }
