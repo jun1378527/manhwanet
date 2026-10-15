@@ -207,6 +207,57 @@ public class CrawlRunService {
         return after;
     }
 
+    /** #46: 429 를 받았다. 잠금을 쥔 프로세스만. 이 실행에서 받은 429 횟수(이번 포함)를 돌려준다 */
+    @Transactional
+    public int recordRateLimit(long runId, String owner) {
+        requireLeaseForWrite(runId, owner, true);
+        return runRepository.incrementRateLimitHits(runId);
+    }
+
+    /** #46: 이 실행에서 받은 429 횟수(잠금 넘겨받기 뒤에도 이어서 센다) */
+    public int rateLimitHits(long runId) {
+        return runRepository.rateLimitHits(runId);
+    }
+
+    /** #46: 시작할 때 읽은 robots.txt 해시를 남긴다. 잠금을 쥔 프로세스만 */
+    @Transactional
+    public void recordRobots(long runId, String owner, String robotsSha256) {
+        if (robotsSha256 == null || !SHA256.matcher(robotsSha256).matches()) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "robotsSha256 은 소문자 16진수 64자여야 합니다.");
+        }
+        requireLeaseForWrite(runId, owner, true);
+        runRepository.updateRobots(runId, robotsSha256);
+    }
+
+    /**
+     * #46: 같은 플랫폼의 다음 요청을 지금부터 적어도 millis 뒤로 미룬다. 잠금을 쥔 프로세스만.
+     * 호출이 끝나면 트랜잭션을 놓으므로, 기다리는 쪽은 이 메서드 밖에서 잔다.
+     */
+    @Transactional
+    public void postponeNextRequest(long runId, String owner, long millis) {
+        if (millis < 0 || millis > java.util.concurrent.TimeUnit.DAYS.toMillis(2)) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "다음 요청까지 미룰 시간이 범위를 벗어났습니다.");
+        }
+        requireLeaseForWrite(runId, owner, true);
+        runRepository.postponeNextRequest(runId, millis);
+    }
+
+    /** #46: 다음 요청까지 남은 밀리초. 읽기만 하고 행을 잠그지 않는다 */
+    @Transactional(readOnly = true)
+    public long millisUntilNextRequest(long runId) {
+        return runRepository.millisUntilNextRequest(runId);
+    }
+
+    /** #46: 통계(JSON 객체)를 합친다. 일시 정지·차단 직전에 사유와 요청 수를 남기는 데 쓴다. 잠금을 쥔 프로세스만 */
+    @Transactional
+    public void recordStats(long runId, String owner, String statsJson) {
+        if (statsJson == null || !statsJson.strip().startsWith("{")) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "stats 는 JSON 객체여야 합니다.");
+        }
+        requireLeaseForWrite(runId, owner, true);
+        runRepository.mergeStats(runId, statsJson);
+    }
+
     public RunRow find(long runId) {
         return runRepository.findById(runId).orElseThrow(() -> new BusinessException(ErrorCode.CRAWL_RUN_NOT_FOUND));
     }

@@ -114,6 +114,48 @@ public class CrawlRunRepository {
                         .addValue("stats", statsJson, java.sql.Types.VARCHAR));
     }
 
+    /** #46: 이 실행에서 받은 429 횟수를 하나 올리고 새 값을 돌려준다 */
+    public int incrementRateLimitHits(long id) {
+        return jdbc.queryForObject("UPDATE crawl_runs SET rate_limit_hits = rate_limit_hits + 1 WHERE id = :id "
+                + "RETURNING rate_limit_hits", new MapSqlParameterSource("id", id), Integer.class);
+    }
+
+    /** #46: 이 실행에서 받은 429 횟수 */
+    public int rateLimitHits(long id) {
+        return jdbc.queryForObject("SELECT rate_limit_hits FROM crawl_runs WHERE id = :id",
+                new MapSqlParameterSource("id", id), Integer.class);
+    }
+
+    /** #46: 실행을 시작할 때 읽은 robots.txt 의 SHA-256 */
+    public void updateRobots(long id, String robotsSha256) {
+        update("UPDATE crawl_runs SET robots_sha256 = :robots WHERE id = :id",
+                new MapSqlParameterSource().addValue("id", id).addValue("robots", robotsSha256, java.sql.Types.VARCHAR));
+    }
+
+    /** #46: 다음 요청은 지금부터 적어도 millis 뒤. 이미 더 늦은 시각이 있으면 유지한다 */
+    public void postponeNextRequest(long id, long millis) {
+        update("""
+                UPDATE crawl_runs SET next_request_at = GREATEST(COALESCE(next_request_at, now()),
+                    now() + (:millis * INTERVAL '1 millisecond'))
+                WHERE id = :id""",
+                new MapSqlParameterSource().addValue("id", id).addValue("millis", millis));
+    }
+
+    /** #46: 다음 요청까지 남은 밀리초. 시각이 없거나 지났으면 0. 행 잠금은 잡지 않는다 */
+    public long millisUntilNextRequest(long id) {
+        Long millis = jdbc.queryForObject("""
+                SELECT COALESCE(CEIL(EXTRACT(EPOCH FROM (next_request_at - now())) * 1000), 0)::bigint
+                FROM crawl_runs WHERE id = :id""",
+                new MapSqlParameterSource("id", id), Long.class);
+        return millis == null || millis < 0 ? 0 : millis;
+    }
+
+    /** #46: 통계 JSON 객체를 기존 값에 합친다(같은 키는 새 값) */
+    public void mergeStats(long id, String statsJson) {
+        update("UPDATE crawl_runs SET stats = stats || CAST(:stats AS jsonb) WHERE id = :id",
+                new MapSqlParameterSource().addValue("id", id).addValue("stats", statsJson, java.sql.Types.VARCHAR));
+    }
+
     private void update(String sql, MapSqlParameterSource params) {
         if (jdbc.update(sql, params) != 1) {
             throw new IllegalStateException("crawl run was not updated: " + params.getValue("id"));

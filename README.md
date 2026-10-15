@@ -170,6 +170,24 @@ Invoke-RestMethod http://127.0.0.1:8080/api/v1/admin/creators -Method Post -WebS
 Invoke-RestMethod http://127.0.0.1:8080/api/v1/admin/works -Method Post -WebSession $s -Headers $h -ContentType "application/json; charset=utf-8" -Body '{"workFormat":"WEBTOON","titles":[{"title":"달빛 기사단","languageCode":"ko","primary":true}],"creators":[{"creatorId":1,"role":"STORY"}],"evidence":[{"field":"TITLE","sourceType":"STAFF","verifiedAt":"2026-10-14T00:00:00Z"},{"field":"CREDIT","sourceType":"STAFF","verifiedAt":"2026-10-14T00:00:00Z"}]}'
 ```
 
+#### 수집 명령 (#46, `collector` 프로필)
+
+플랫폼 수집은 웹 서버와 별도인 명령으로만 시작합니다. 일반 웹 서버 실행(기본 프로필)으로는 수집이 시작되지 않습니다. 실제 플랫폼 어댑터는 아직 없습니다(#47~#50). 규칙은 [docs/collector-core-spec.md](docs/collector-core-spec.md)를 참고하세요.
+
+```powershell
+cd backend
+.\gradlew.bat bootJar
+# 새 실행: kind 는 PROBE·FULL·INCREMENTAL·RECHECK. 연락처(contact-url)는 기본값이 없고 지정해야 시작합니다(D-16)
+java -jar build\libs\manhwanet-0.0.1-SNAPSHOT.jar --spring.profiles.active=local,collector `
+  --manhwanet.collector.contact-url=https://<서비스 소개 페이지> `
+  --manhwanet.collector.command=start --manhwanet.collector.platform=RIDI --manhwanet.collector.kind=PROBE
+# 재개(멈춘 실행·잠금이 만료된 실행): --manhwanet.collector.command=resume --manhwanet.collector.run-id=12
+# 중단 요청: --manhwanet.collector.command=stop --manhwanet.collector.run-id=12 --manhwanet.collector.actor-email=admin@example.com --manhwanet.collector.reason=점검
+```
+
+- 플랫폼 수집 설정이 `DISABLED`(기본값)이면 실행을 만들지 않고 요청도 보내지 않습니다. `PROBE` 설정에서는 `PROBE` 실행만 되며 robots.txt·사이트맵만 요청합니다.
+- 요청 간격은 플랫폼당 최소 5초(+0~1초), 동시 1건입니다. 403·CAPTCHA·429 반복은 실행을 멈추고 기록합니다(우회 없음).
+
 ### 3. Frontend 실행
 
 ```bash
@@ -242,10 +260,12 @@ cd backend
 | `WorkListingConcurrencyTest` | 같은 플랫폼 작품을 두 작품에 동시에 연결하면 하나만 성공, 같은 version 동시 등록, 플랫폼 종료와 연결 등록 경쟁, 작품 version 증가 실패 시 연결 롤백 (#39) | O |
 | `WorkProvenanceApiIntegrationTest` | 작품 외부 ID·공식 링크·필드별 근거·변경 기록 API: 익명 401·USER 403·CSRF 누락 403, 같은 출처 외부 ID 중복 409(`existingWorkId`)·다른 출처 같은 번호 허용·INVALID 로 자리 비우기·되살리기 409, 형식·URL·큰 ID·오래된 version, 링크 URL 검증·플랫폼 호스트 거절·같은 작품 중복 409, 근거 규칙(줄거리 STAFF·LICENSED, LISTING 대상), 철회, 변경 기록 필터·쪽 나누기 (#40) | O |
 | `AdminChangeFlowIntegrationTest` | 작품 등록과 함께 연결·외부 ID·링크·근거 저장과 재시도 409(작품 1개 유지), 근거 필수, 수정 사유·바뀐 필드 근거·같은 내용 무기록, 작가 외부 ID·이름 변경 기록, 연결 생성·상태·이전·평탄화와 플랫폼 상태 기록, 별점·리뷰·ID 보존 (#40) | O |
-| `CollectionSchemaMigrationTest` | V9~V12 적용, 새 FK CASCADE 없음, 수집 설정 10곳 `DISABLED` 시작, 설정 변경자 CHECK, 플랫폼당 활성 실행 하나, 작업·staging·식별 키·이력 유니크, 등급·소개문·실패 CHECK, 후보·표지·누락 현황 제약 (#45) | O |
+| `CollectionSchemaMigrationTest` | V9~V12 적용(V13 은 #46), 새 FK CASCADE 없음, 수집 설정 10곳 `DISABLED` 시작, 설정 변경자 CHECK, 플랫폼당 활성 실행 하나, 작업·staging·식별 키·이력 유니크, 등급·소개문·실패 CHECK, 후보·표지·누락 현황 제약 (#45) | O |
 | `CrawlRunLifecycleTest` | 수집 설정 게이트, 동시 시작 시 실행 하나, 잠금 만료 뒤 같은 실행 넘겨받기·남은 작업만 재개, 잠금 잃은 프로세스 쓰기 거절, 일시 정지·차단·중단 요청·중단 확정, 작업 중복 방지·재시도·실패 표본·동시 가져가기 (#45) | O |
 | `StagingIngestTest` | 재수집해도 한 행·실행당 이력 한 줄·처음 이전 값 유지, 실패 시 내용 보존·연속 실패 한 번만 세기, 명시 신호로만 등급(미확인 `UNKNOWN`), 소개문 정책, 별칭·충돌, 동시 반영 한 행, 이력 실패 시 롤백, 작품·연결 미등록 (#45) | O |
 | `CollectionAdminApiIntegrationTest` | 익명 401·USER 403·CSRF 누락 403, 수집 설정 사유·version·변경 기록·활성 실행 경고, 실행·staging 조회, 중단 요청·기록, 큰 ID·잘못된 조회 400 (#45) | O |
+| `CollectorEngineIntegrationTest` | 수집기 공통 기반(모의 HTTP 서버 127.0.0.1·격리 DB): `DISABLED` 실행 없음·요청 없음, `PROBE` 는 robots·사이트맵만, 웹 컨텍스트에 수집 명령 없음, 요청 간격 5초(리다이렉트·재시도·재개 포함)·Crawl-delay, robots 금지·6시간 뒤 다시 읽기·읽기 실패 시 차단, 429 Retry-After·간격 2배·2회째 차단, 403·CAPTCHA 즉시 차단, 로그인·성인·결제 리다이렉트 미추적(GATED), 허용하지 않은 호스트·사설 IP·http·다른 포트 리다이렉트 거절, 5xx 30초·2분·8분·30분 재시도 뒤 실패, 회로 차단기, 타임아웃·크기 상한·404·파싱 실패 표본 가림, 하루 상한 일시 정지, 설정 끄면 일시 정지, 대기 중 중단 요청·잠금 연장·잠금 상실, 요청 중 잠금 상실 시 결과 쓰기 거절, 네트워크 대기 중 DB 연결 0, 쿠키·세션 값 로그 미기록 (#46) | O |
+| `HttpTransportTest`, `RobotsRulesTest`, `PublicAddressPolicyTest`, `PlatformThrottleTest`, `CollectorCoreUnitTest`, `CollectCommandTest` | 고정 요청 헤더·Set-Cookie 버림, Content-Length·청크·gzip 크기 상한, 전체 시간 제한, 운영 네트워크의 로컬·사설·메타데이터 주소 거절(연결 전), TLS 인증서 호스트 이름 확인 / robots 해석(RFC 9309) / 목적지 IP 판정 / 동시 1건·간격·Retry-After / 재시도 계산·Retry-After·회로 차단기·사용자 에이전트·차단·인증 화면 판단·로그 가림 / `collector` 프로필 전용·웹 서버 없음·인자 검사 (#46) | X |
 | `ProvenanceConcurrencyTest`, `ProvenanceMigrationTest` | 같은 외부 ID 동시 연결은 하나만 성공, 같은 version 하위 리소스 동시 변경, 기록 실패·version 증가 실패 시 등록·변경 전체 롤백 / V8 FK(CASCADE 없음)·부분 유니크·CHECK·복합 FK·변경 기록 추가 전용 (#40) | O |
 | `PlatformListingMigrationTest`, `AgeRatingClassifierTest`, `PlatformUrlsTest` | V7 FK(CASCADE 없음)·유니크·CHECK·복합 FK, 초기 데이터와 테스트 시드 일치, 등급 분류, URL 정규화·패턴 검사 (#39) | O / X |
 | `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |

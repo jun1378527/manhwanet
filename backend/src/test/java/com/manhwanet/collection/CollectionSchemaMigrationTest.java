@@ -49,7 +49,7 @@ class CollectionSchemaMigrationTest {
     @Test
     void migrationsApplyWithoutCascadeAndPoliciesStartDisabled() {
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank",
-                String.class)).containsSubsequence("8", "9", "10", "11", "12");
+                String.class)).containsSubsequence("8", "9", "10", "11", "12", "13", "14");
         assertThat(jdbc.queryForList("SELECT DISTINCT confdeltype FROM pg_constraint WHERE contype = 'f' AND conrelid IN ("
                 + NEW_TABLES + ")", String.class)).containsExactly("a");
         List<Map<String, Object>> policies = jdbc.queryForList("""

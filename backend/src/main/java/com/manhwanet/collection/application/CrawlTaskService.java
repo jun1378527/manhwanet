@@ -125,6 +125,16 @@ public class CrawlTaskService {
         return taskRepository.findById(taskId).orElseThrow();
     }
 
+    /** #46: 아직 때가 되지 않은 PENDING 작업 중 가장 이른 것까지 남은 밀리초. PENDING 이 없으면 빈 값 */
+    public java.util.Optional<Long> nextPendingDelayMillis(long runId) {
+        return taskRepository.nextPendingDelayMillis(runId);
+    }
+
+    /** #46: 작업 상태별 수 */
+    public java.util.Map<TaskStatus, Long> countByStatus(long runId) {
+        return taskRepository.countByStatus(runId);
+    }
+
     private TaskRow runningTask(long taskId, String owner) {
         TaskRow task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CRAWL_TASK_NOT_FOUND));
@@ -137,7 +147,7 @@ public class CrawlTaskService {
         return locked;
     }
 
-    static String taskUrl(String raw) {
+    public static String taskUrl(String raw) {
         if (raw == null || raw.isBlank() || raw.strip().length() > MAX_TASK_URL_LENGTH) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "작업 URL 은 1~" + MAX_TASK_URL_LENGTH + "자여야 합니다.");
         }
@@ -162,7 +172,7 @@ public class CrawlTaskService {
         return status;
     }
 
-    static String sha256(String value) {
+    public static String sha256(String value) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {

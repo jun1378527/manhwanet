@@ -1,0 +1,10 @@
+# 수집 명령 전용 프로필(#46). 웹 서버를 띄우지 않고 CollectCommand 만 실행한 뒤 종료한다.
+# 일반 웹 서버(기본 프로필)에서는 수집 코드가 실행되지 않는다.
+# 예) java -jar manhwanet.jar --spring.profiles.active=local,collector \
+#       --manhwanet.collector.contact-url=https://<서비스 소개 페이지> \
+#       --manhwanet.collector.command=start --manhwanet.collector.platform=RIDI --manhwanet.collector.kind=PROBE
+# 연락처(contact-url)는 기본값이 없다(D-16). 지정하지 않으면 시작하지 않는다.
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off

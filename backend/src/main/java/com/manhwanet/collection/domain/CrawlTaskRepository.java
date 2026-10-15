@@ -91,6 +91,18 @@ public class CrawlTaskRepository {
         }
     }
 
+    /**
+     * #46: 아직 때가 되지 않은 PENDING 작업 중 가장 이른 것까지 남은 밀리초(DB now() 기준, 0 이상).
+     * PENDING 작업이 없으면 빈 값
+     */
+    public Optional<Long> nextPendingDelayMillis(long runId) {
+        return jdbc.queryForList("""
+                SELECT CAST(GREATEST(0, EXTRACT(EPOCH FROM (m - now())) * 1000) AS BIGINT)
+                FROM (SELECT MIN(next_attempt_at) AS m FROM crawl_tasks WHERE run_id = :run AND status = 'PENDING') x
+                WHERE m IS NOT NULL""",
+                new MapSqlParameterSource("run", runId), Long.class).stream().findFirst();
+    }
+
     /** 잠금을 넘겨받을 때: 끝나지 않은 RUNNING 작업을 PENDING 으로 되돌린다(시도 횟수는 그대로) */
     public int resetRunning(long runId) {
         return jdbc.update("UPDATE crawl_tasks SET status = 'PENDING', updated_at = now() WHERE run_id = :run AND status = 'RUNNING'",
