@@ -65,7 +65,8 @@ public class ChangeLogQuery {
         if (type != null) {
             where = "entity_type = :type AND entity_id = :entityId";
             params.addValue("type", type.name()).addValue("entityId",
-                    type == ChangeEntityType.PLATFORM ? id.toUpperCase(Locale.ROOT) : id);
+                    type == ChangeEntityType.PLATFORM || type == ChangeEntityType.COLLECTION_POLICY
+                            ? id.toUpperCase(Locale.ROOT) : id);
         } else if (work != null) {
             where = "work_id = :workId";
             params.addValue("workId", work);

@@ -47,6 +47,21 @@ public enum ErrorCode {
     WORK_LINK_ALREADY_EXISTS(HttpStatus.CONFLICT, "이 작품에 같은 URL 의 공식 링크가 이미 있습니다. 기존 링크의 상태를 바꿔 주세요."),
     FIELD_SOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "근거를 찾을 수 없습니다."),
 
+    // collection (#45)
+    /** 플랫폼 수집 설정이 이 실행을 허용하지 않음(DISABLED, 또는 PROBE 설정에서 PROBE 외 실행) */
+    COLLECTION_NOT_ALLOWED(HttpStatus.CONFLICT, "이 플랫폼의 수집 설정이 이 실행을 허용하지 않습니다."),
+    COLLECTION_POLICY_VERSION_CONFLICT(HttpStatus.CONFLICT, "수집 설정이 다른 곳에서 바뀌었습니다. 최신 내용을 다시 불러온 뒤 수정해 주세요."),
+    /** 같은 플랫폼에 활성 실행이 이미 있음. 새 실행을 만들지 않고 그 실행을 이어 간다 */
+    CRAWL_RUN_ACTIVE(HttpStatus.CONFLICT, "이 플랫폼에 이미 진행 중인 수집 실행이 있습니다."),
+    CRAWL_RUN_NOT_FOUND(HttpStatus.NOT_FOUND, "수집 실행을 찾을 수 없습니다."),
+    /** 실행 잠금을 쥐고 있지 않거나(만료·다른 프로세스가 넘겨받음) 실행 상태가 이 작업을 허용하지 않음 */
+    CRAWL_RUN_LEASE_LOST(HttpStatus.CONFLICT, "이 수집 실행의 잠금을 쥐고 있지 않습니다."),
+    CRAWL_RUN_STATE_CONFLICT(HttpStatus.CONFLICT, "수집 실행의 현재 상태에서는 할 수 없는 요청입니다."),
+    CRAWL_TASK_NOT_FOUND(HttpStatus.NOT_FOUND, "수집 작업을 찾을 수 없습니다."),
+    STAGING_LISTING_NOT_FOUND(HttpStatus.NOT_FOUND, "수집 대기 항목을 찾을 수 없습니다."),
+    /** 별칭 ID 가 이미 다른 staging 행을 가리키거나 다른 행의 대표 ID 임 */
+    STAGING_ALIAS_CONFLICT(HttpStatus.CONFLICT, "이 별칭 ID 는 이미 다른 수집 대기 항목에 연결되어 있습니다."),
+
     // creator
     CREATOR_NOT_FOUND(HttpStatus.NOT_FOUND, "작가를 찾을 수 없습니다."),
     /** 관리자 수정 요청의 version 이 현재 작가 version 과 다름. 아무것도 바꾸지 않는다 */

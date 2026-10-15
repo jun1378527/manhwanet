@@ -10,3 +10,4 @@
 - [login-limit-design-draft.md](login-limit-design-draft.md) — 로그인 보호 **확정 명세** (#10: 계정별 제한·용량·전역 해시 게이트·429/503·Retry-After·검증 계획. 잠정 수치 포함). 구현 #28
 - [ui-design-draft.md](ui-design-draft.md) — UI 디자인 방향 **초안** (방향 A·B, 화면 시안, 공통 규칙, 디자인만/데이터·API 필요 구분). 시안 파일: [ui-mockups/manhwanet-ui-mockups.html](ui-mockups/manhwanet-ui-mockups.html)
 - [work-platform-admin-spec.md](work-platform-admin-spec.md) — 작품·플랫폼 관리 구현 명세 **초안** (#37: ADMIN 수정·동시 수정 충돌(#38 구현), 플랫폼 연결·상태 이력(#39 구현, V7), 외부 ID·공식 링크·근거·관리 변경 기록(#40 구현, V8), 중복 검수, 파일럿, 이슈 #38~#44)
+- [collection-staging-spec.md](collection-staging-spec.md) — 수집 실행·staging **구현 기록** (#45: V9~V12, 수집 설정·실행 잠금·재개·중단, 작업 큐, staging 식별 키·등급·변경 이력·실패 보존, 관리자 API, 설계와 다른 점)

@@ -25,13 +25,19 @@ public final class TestDatabaseCleaner {
         String testDbName = TestDatabaseNames.configuredTestDatabaseName(environment);
         requireCurrentDatabase(jdbcTemplate, testDbName);
         jdbcTemplate.execute("""
-                TRUNCATE TABLE admin_change_log, work_field_sources, work_links, work_external_ids, creator_external_ids,
+                TRUNCATE TABLE platform_coverage_snapshots, cover_asset_stage_history, cover_assets,
+                               staging_match_candidates, staging_listing_changes, staging_credits,
+                               staging_listing_discoveries, staging_id_aliases, staging_identity_keys, staging_listings,
+                               crawl_failure_samples, crawl_tasks, crawl_runs, platform_collection_policies,
+                               admin_change_log, work_field_sources, work_links, work_external_ids, creator_external_ids,
                                work_reviews, work_ratings, work_creators, work_titles, works, creators, users,
                                work_platform_listings, platform_status_history, platform_hosts, platforms
                 RESTART IDENTITY CASCADE
                 """);
         // 플랫폼 코드 표는 마이그레이션 초기 데이터로 되돌린다(테스트가 상태·규칙을 바꿀 수 있으므로).
         jdbcTemplate.execute(platformSeed());
+        // 수집 설정은 V9 초기값(10곳 모두 DISABLED)으로 되돌린다
+        jdbcTemplate.execute("INSERT INTO platform_collection_policies (platform_code) SELECT code FROM platforms ORDER BY code");
     }
 
     private static String platformSeedSql;

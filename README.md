@@ -242,6 +242,10 @@ cd backend
 | `WorkListingConcurrencyTest` | 같은 플랫폼 작품을 두 작품에 동시에 연결하면 하나만 성공, 같은 version 동시 등록, 플랫폼 종료와 연결 등록 경쟁, 작품 version 증가 실패 시 연결 롤백 (#39) | O |
 | `WorkProvenanceApiIntegrationTest` | 작품 외부 ID·공식 링크·필드별 근거·변경 기록 API: 익명 401·USER 403·CSRF 누락 403, 같은 출처 외부 ID 중복 409(`existingWorkId`)·다른 출처 같은 번호 허용·INVALID 로 자리 비우기·되살리기 409, 형식·URL·큰 ID·오래된 version, 링크 URL 검증·플랫폼 호스트 거절·같은 작품 중복 409, 근거 규칙(줄거리 STAFF·LICENSED, LISTING 대상), 철회, 변경 기록 필터·쪽 나누기 (#40) | O |
 | `AdminChangeFlowIntegrationTest` | 작품 등록과 함께 연결·외부 ID·링크·근거 저장과 재시도 409(작품 1개 유지), 근거 필수, 수정 사유·바뀐 필드 근거·같은 내용 무기록, 작가 외부 ID·이름 변경 기록, 연결 생성·상태·이전·평탄화와 플랫폼 상태 기록, 별점·리뷰·ID 보존 (#40) | O |
+| `CollectionSchemaMigrationTest` | V9~V12 적용, 새 FK CASCADE 없음, 수집 설정 10곳 `DISABLED` 시작, 설정 변경자 CHECK, 플랫폼당 활성 실행 하나, 작업·staging·식별 키·이력 유니크, 등급·소개문·실패 CHECK, 후보·표지·누락 현황 제약 (#45) | O |
+| `CrawlRunLifecycleTest` | 수집 설정 게이트, 동시 시작 시 실행 하나, 잠금 만료 뒤 같은 실행 넘겨받기·남은 작업만 재개, 잠금 잃은 프로세스 쓰기 거절, 일시 정지·차단·중단 요청·중단 확정, 작업 중복 방지·재시도·실패 표본·동시 가져가기 (#45) | O |
+| `StagingIngestTest` | 재수집해도 한 행·실행당 이력 한 줄·처음 이전 값 유지, 실패 시 내용 보존·연속 실패 한 번만 세기, 명시 신호로만 등급(미확인 `UNKNOWN`), 소개문 정책, 별칭·충돌, 동시 반영 한 행, 이력 실패 시 롤백, 작품·연결 미등록 (#45) | O |
+| `CollectionAdminApiIntegrationTest` | 익명 401·USER 403·CSRF 누락 403, 수집 설정 사유·version·변경 기록·활성 실행 경고, 실행·staging 조회, 중단 요청·기록, 큰 ID·잘못된 조회 400 (#45) | O |
 | `ProvenanceConcurrencyTest`, `ProvenanceMigrationTest` | 같은 외부 ID 동시 연결은 하나만 성공, 같은 version 하위 리소스 동시 변경, 기록 실패·version 증가 실패 시 등록·변경 전체 롤백 / V8 FK(CASCADE 없음)·부분 유니크·CHECK·복합 FK·변경 기록 추가 전용 (#40) | O |
 | `PlatformListingMigrationTest`, `AgeRatingClassifierTest`, `PlatformUrlsTest` | V7 FK(CASCADE 없음)·유니크·CHECK·복합 FK, 초기 데이터와 테스트 시드 일치, 등급 분류, URL 정규화·패턴 검사 (#39) | O / X |
 | `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |
@@ -366,6 +370,10 @@ npm run build
 | POST·PATCH | `/api/v1/admin/works/{workId}/links[/{id}]` | 출판사·공식 사이트 링크 추가(201)·상태 변경(`ACTIVE`·`BROKEN`·`REMOVED`) (ADMIN, #40) |
 | POST·PATCH | `/api/v1/admin/works/{workId}/field-sources[/{id}]` | 필드별 근거 추가(201)·철회(`RETRACTED`) (ADMIN, #40) |
 | GET | `/api/v1/admin/change-log?workId=` \| `?creatorId=` \| `?entityType=&entityId=` | 관리 변경 기록 최신순(`limit` 1~100, `beforeId`) (ADMIN, #40) |
+| GET·PUT | `/api/v1/admin/collection-policies[/{platformCode}]` | 플랫폼 수집 설정 조회·전체 교체(`reason` 필수, 불일치 409 `COLLECTION_POLICY_VERSION_CONFLICT`) (ADMIN, #45) |
+| GET | `/api/v1/admin/crawl-runs[/{runId}]` | 수집 실행 목록·상세(작업 상태별 수) (ADMIN, #45) |
+| POST | `/api/v1/admin/crawl-runs/{runId}/stop` | 수집 실행 중단 요청 `{"reason"}` (ADMIN, #45) |
+| GET | `/api/v1/admin/staging-listings[/{id}]` | 수집 대기(staging) 목록·상세. 비공개, 작품으로 자동 등록하지 않음 (ADMIN, #45) |
 | GET | `/api/v1/admin/platforms` | 플랫폼 10곳: 코드·이름·운영 상태와 근거·URL 규칙·허용 호스트·`version` (ADMIN) |
 | GET·PUT | `/api/v1/admin/platforms/{code}` | 플랫폼 조회·URL 규칙 등 전체 교체 (ADMIN, 불일치 409 `PLATFORM_VERSION_CONFLICT`) |
 | POST | `/api/v1/admin/platforms/{code}/status` | 운영 상태 변경 + 이력 `{"version", "toStatus", "statusBasis", "mergedInto", "effectiveOn", "evidenceUrl", "note", "reason"}` (ADMIN, `reason` 필수) |
