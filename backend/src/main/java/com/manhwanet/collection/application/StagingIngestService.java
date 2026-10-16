@@ -172,6 +172,8 @@ public class StagingIngestService {
         }
         if (!diff.isEmpty()) {
             stagingRepository.upsertChange(stagingId, runId, json(mergeChange(stagingId, runId, diff)));
+            // #51: 내용·수집 상태가 바뀌면 수집 revision 을 올린다(검수 승인은 본 revision 과 같을 때만)
+            stagingRepository.bumpRevision(stagingId);
         }
         return new IngestResult(stagingId, created, contentChanged, List.copyOf(diff.keySet()), byAlias);
     }

@@ -155,6 +155,17 @@ public class StagingRepository {
         }
     }
 
+    /** #51: 수집 revision 을 1 올린다 */
+    public void bumpRevision(long id) {
+        jdbc.update("UPDATE staging_listings SET revision = revision + 1 WHERE id = :id", new MapSqlParameterSource("id", id));
+    }
+
+    /** #51: 현재 수집 revision */
+    public long revision(long id) {
+        return jdbc.queryForObject("SELECT revision FROM staging_listings WHERE id = :id", new MapSqlParameterSource("id", id),
+                Long.class);
+    }
+
     public List<StagingCreditRow> findCredits(long stagingId) {
         return jdbc.query("""
                 SELECT id, name_raw, role_raw, role, platform_creator_id, position FROM staging_credits

@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>GET /api/v1/admin/staging-listings?platformCode=&reviewStatus=&detailStatus=&limit=&beforeId=,
  *       GET /api/v1/admin/staging-listings/{id}</li>
  * </ul>
- * 실행 시작·작업·수집 결과 반영은 수집기(#46)가 서비스로 직접 하며 HTTP 로 열지 않는다. staging 을 공개 작품으로 등록하는 API 는 없다(#51).
+ * 실행 시작·작업·수집 결과 반영은 수집기(#46)가 서비스로 직접 하며 HTTP 로 열지 않는다. staging 검수·등록은 StagingReviewAdminController(#51).
  */
 @RestController
 @RequestMapping("/admin")

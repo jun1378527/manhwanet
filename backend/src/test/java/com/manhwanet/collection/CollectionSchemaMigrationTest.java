@@ -15,7 +15,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
-/** V9~V12(수집 설정·실행 기록·staging·식별 키·검수 후보·표지·누락 현황) 마이그레이션과 실제 PostgreSQL 제약 (#45) */
+/** V9~V15(수집 설정·실행 기록·staging·식별 키·검수 후보·표지·누락 현황·검수 결정) 마이그레이션과 실제 PostgreSQL 제약 (#45, #51) */
 @SpringBootTest
 @ActiveProfiles("test")
 class CollectionSchemaMigrationTest {
@@ -26,7 +26,7 @@ class CollectionSchemaMigrationTest {
             'staging_listing_discoveries'::regclass, 'staging_credits'::regclass, 'staging_listing_changes'::regclass,
             'staging_identity_keys'::regclass,
             'staging_match_candidates'::regclass, 'cover_assets'::regclass, 'cover_asset_stage_history'::regclass,
-            'platform_coverage_snapshots'::regclass""";
+            'platform_coverage_snapshots'::regclass, 'staging_review_decisions'::regclass""";
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -49,7 +49,7 @@ class CollectionSchemaMigrationTest {
     @Test
     void migrationsApplyWithoutCascadeAndPoliciesStartDisabled() {
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank",
-                String.class)).containsSubsequence("8", "9", "10", "11", "12", "13", "14");
+                String.class)).containsSubsequence("8", "9", "10", "11", "12", "13", "14", "15");
         assertThat(jdbc.queryForList("SELECT DISTINCT confdeltype FROM pg_constraint WHERE contype = 'f' AND conrelid IN ("
                 + NEW_TABLES + ")", String.class)).containsExactly("a");
         List<Map<String, Object>> policies = jdbc.queryForList("""
@@ -161,6 +161,55 @@ class CollectionSchemaMigrationTest {
                 + ", 'URL_COLLECTED', 'URL_COLLECTED', " + user + ")", "ck_cover_hist_stages");
         rejected("INSERT INTO platform_coverage_snapshots (platform_code, taken_on, metrics, status) VALUES ('RIDI', current_date, '{}', 'DONE')",
                 "ck_coverage_status");
+    }
+
+    @Test
+    void reviewRevisionAndDecisionConstraints() {
+        long stagingId = insertStaging("RIDI", "v15-1");
+        assertThat(jdbc.queryForObject("SELECT revision FROM staging_listings WHERE id = ?", Long.class, stagingId)).isZero();
+        rejected("UPDATE staging_listings SET revision = -1 WHERE id = " + stagingId, "ck_staging_revision");
+
+        long workId = jdbc.queryForObject("INSERT INTO works (work_format) VALUES ('WEBTOON') RETURNING id", Long.class);
+        long listingId = jdbc.queryForObject("""
+                INSERT INTO work_platform_listings (work_id, platform_code, platform_work_id, id_scope, url, listing_kind,
+                    language_code, first_verified_at, last_verified_at, verified_by)
+                VALUES (?, 'RIDI', '910015', 'SERIES', 'https://ridibooks.com/books/910015', 'MAIN', 'ko', now(), now(), ?)
+                RETURNING id""", Long.class, workId, adminId);
+        jdbc.update("""
+                INSERT INTO staging_review_decisions
+                    (staging_id, decision, staging_revision, from_status, to_status, reason, decided_by)
+                VALUES (?, 'HOLD', 0, 'NEW', 'ON_HOLD', '보류', ?)""", stagingId, adminId);
+        // 보류는 여러 번 남을 수 있다. 연결·등록은 항목당 하나다
+        jdbc.update("""
+                INSERT INTO staging_review_decisions
+                    (staging_id, decision, staging_revision, from_status, to_status, reason, decided_by)
+                VALUES (?, 'HOLD', 0, 'ON_HOLD', 'ON_HOLD', '다시 보류', ?)""", stagingId, adminId);
+        rejected("INSERT INTO staging_review_decisions (staging_id, decision, staging_revision, from_status, to_status, work_id, "
+                + "reason, decided_by) VALUES (" + stagingId + ", 'LINK_EXISTING', 0, 'ON_HOLD', 'LINKED', " + workId
+                + ", '연결', " + adminId + ")", "ck_srd_target");
+        rejected("INSERT INTO staging_review_decisions (staging_id, decision, staging_revision, from_status, to_status, reason, "
+                + "decided_by) VALUES (" + stagingId + ", 'MERGE', 0, 'NEW', 'LINKED', '결정', " + adminId + ")", "ck_srd_decision");
+        rejected("INSERT INTO staging_review_decisions (staging_id, decision, staging_revision, from_status, to_status, reason, "
+                + "decided_by) VALUES (" + stagingId + ", 'HOLD', -1, 'NEW', 'ON_HOLD', '결정', " + adminId + ")", "ck_srd_revision");
+        rejected("INSERT INTO staging_review_decisions (staging_id, decision, staging_revision, from_status, to_status, reason, "
+                + "decided_by) VALUES (" + stagingId + ", 'HOLD', 0, 'NEW', 'ON_HOLD', '  ', " + adminId + ")", "ck_srd_reason");
+        jdbc.update("""
+                INSERT INTO staging_review_decisions
+                    (staging_id, decision, staging_revision, from_status, to_status, work_id, listing_id, reason, decided_by)
+                VALUES (?, 'LINK_EXISTING', 0, 'ON_HOLD', 'LINKED', ?, ?, '연결', ?)""", stagingId, workId, listingId, adminId);
+        rejected("INSERT INTO staging_review_decisions (staging_id, decision, staging_revision, from_status, to_status, work_id, "
+                + "listing_id, reason, decided_by) VALUES (" + stagingId + ", 'CREATE_WORK', 0, 'LINKED', 'NEW_WORK', " + workId
+                + ", " + listingId + ", '등록', " + adminId + ")", "uk_srd_final");
+        assertThatThrownBy(() -> jdbc.update("UPDATE staging_review_decisions SET reason = '바꿈' WHERE staging_id = " + stagingId))
+                .hasMessageContaining("append-only");
+        assertThatThrownBy(() -> jdbc.update("DELETE FROM staging_review_decisions WHERE staging_id = " + stagingId))
+                .hasMessageContaining("append-only");
+        jdbc.update("""
+                INSERT INTO admin_change_log (entity_type, entity_id, action, after_json, actor_id)
+                VALUES ('STAGING_LISTING', ?, 'CREATE', '{}', ?)""", String.valueOf(stagingId), adminId);
+        assertThat(jdbc.queryForList("""
+                SELECT DISTINCT confdeltype FROM pg_constraint
+                WHERE contype = 'f' AND conrelid = 'staging_review_decisions'::regclass""", String.class)).containsExactly("a");
     }
 
     private long insertStaging(String platform, String id) {

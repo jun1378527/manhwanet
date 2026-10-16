@@ -25,7 +25,7 @@ public final class TestDatabaseCleaner {
         String testDbName = TestDatabaseNames.configuredTestDatabaseName(environment);
         requireCurrentDatabase(jdbcTemplate, testDbName);
         jdbcTemplate.execute("""
-                TRUNCATE TABLE collector_daily_requests, platform_coverage_snapshots, cover_asset_stage_history, cover_assets,
+                TRUNCATE TABLE staging_review_decisions, collector_daily_requests, platform_coverage_snapshots, cover_asset_stage_history, cover_assets,
                                staging_match_candidates, staging_listing_changes, staging_credits,
                                staging_listing_discoveries, staging_id_aliases, staging_identity_keys, staging_listings,
                                crawl_failure_samples, crawl_tasks, crawl_runs, platform_collection_policies,

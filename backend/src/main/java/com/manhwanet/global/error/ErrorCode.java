@@ -61,6 +61,14 @@ public enum ErrorCode {
     STAGING_LISTING_NOT_FOUND(HttpStatus.NOT_FOUND, "수집 대기 항목을 찾을 수 없습니다."),
     /** 별칭 ID 가 이미 다른 staging 행을 가리키거나 다른 행의 대표 ID 임 */
     STAGING_ALIAS_CONFLICT(HttpStatus.CONFLICT, "이 별칭 ID 는 이미 다른 수집 대기 항목에 연결되어 있습니다."),
+    /** #51: 검수자가 본 수집 revision 과 현재 revision 이 다름(검수 중 재수집). error.currentVersion 에 현재 revision */
+    STAGING_REVISION_CONFLICT(HttpStatus.CONFLICT, "검수하는 동안 수집 내용이 바뀌었습니다. 최신 내용을 다시 확인한 뒤 결정해 주세요."),
+    /** #51: 이미 기존 작품 연결·새 작품 등록으로 끝난 항목 */
+    STAGING_ALREADY_REVIEWED(HttpStatus.CONFLICT, "이미 검수를 마친 수집 대기 항목입니다."),
+    /** #51: 열린 중복 후보를 모두 판단하지 않았거나 후보 목록이 바뀜 */
+    STAGING_REVIEW_CANDIDATES_UNRESOLVED(HttpStatus.CONFLICT, "판단하지 않은 중복 후보가 있습니다. 후보를 다시 불러와 모두 판단해 주세요."),
+    /** #51: 상세를 확인하지 못한 항목 등 이 결정을 할 수 없는 상태 */
+    STAGING_NOT_REVIEWABLE(HttpStatus.CONFLICT, "이 수집 대기 항목은 지금 상태에서 이 결정을 할 수 없습니다."),
 
     // creator
     CREATOR_NOT_FOUND(HttpStatus.NOT_FOUND, "작가를 찾을 수 없습니다."),
