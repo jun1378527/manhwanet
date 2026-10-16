@@ -15,7 +15,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
-/** V9~V15(수집 설정·실행 기록·staging·식별 키·검수 후보·표지·누락 현황·검수 결정) 마이그레이션과 실제 PostgreSQL 제약 (#45, #51) */
+/** V9~V17(수집 설정·실행 기록·staging·식별 키·검수 후보·표지·누락 현황·검수 결정·플랫폼 다음 요청 시각) 마이그레이션과 실제 PostgreSQL 제약 (#45, #51, #68) */
 @SpringBootTest
 @ActiveProfiles("test")
 class CollectionSchemaMigrationTest {
@@ -49,7 +49,7 @@ class CollectionSchemaMigrationTest {
     @Test
     void migrationsApplyWithoutCascadeAndPoliciesStartDisabled() {
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank",
-                String.class)).containsSubsequence("8", "9", "10", "11", "12", "13", "14", "15");
+                String.class)).containsSubsequence("8", "9", "10", "11", "12", "13", "14", "15", "16", "17");
         assertThat(jdbc.queryForList("SELECT DISTINCT confdeltype FROM pg_constraint WHERE contype = 'f' AND conrelid IN ("
                 + NEW_TABLES + ")", String.class)).containsExactly("a");
         List<Map<String, Object>> policies = jdbc.queryForList("""

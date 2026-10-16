@@ -10,10 +10,11 @@
 |---|---|
 | `V13__add_collector_request_limits.sql` | `crawl_runs.rate_limit_hits`(한 실행에서 받은 429 횟수), `crawl_tasks.last_error` CHECK 에 `HTTP_4XX`·`BLOCKED_DESTINATION`·`RESPONSE_TOO_LARGE`·`PROTOCOL_ERROR` 추가(V9 파일은 고치지 않고 V13 에서 제약을 다시 만듦), `collector_daily_requests`(플랫폼별 하루 요청 수) |
 | `V14__add_crawl_run_next_request_at.sql` | `crawl_runs.next_request_at`(다음 요청을 보내도 되는 시각). V13 은 고치지 않음 |
+| `V17__add_platform_next_request_at.sql` | `platform_collection_policies.next_request_at`(플랫폼의 다음 요청 시각, #68). V14 파일은 고치지 않음. 기존 실행 행에 남은 시각이 있으면 플랫폼별 가장 늦은 값으로 채움 |
 
 - V1~V12 는 고치지 않았습니다. 새 FK 에 CASCADE 가 없습니다.
 - `rate_limit_hits` 를 DB 에 둔 이유: 프로세스가 죽어 다른 프로세스가 같은 실행을 넘겨받아도 "한 실행에서 429 두 번째면 중단"이 이어지게 하기 위해서입니다.
-- `next_request_at` 을 DB 에 둔 이유: 요청 간격과 Retry-After 로 미룬 시각이 프로세스 메모리에만 있으면, 요청 직후 프로세스가 끝났을 때 재개 프로세스가 바로 다음 요청을 보내기 때문입니다.
+- `next_request_at` 을 DB 에 둔 이유: 요청 간격과 Retry-After 로 미룬 시각이 프로세스 메모리에만 있으면, 요청 직후 프로세스가 끝났을 때 다음 요청이 바로 나가기 때문입니다. 허용 판단과 예약은 플랫폼 행을 봅니다(#68). 같은 실행을 재개할 때와, 실행이 완료·중단·차단된 뒤 새 실행을 시작할 때 모두 그 시각을 유지합니다. 시작 시 이전 실행에서 복사하지 않습니다. `GREATEST` 라서 이미 더 늦은 시각은 앞당겨지지 않고, 실행을 닫는 갱신은 이 시각을 지우지 않습니다.
 
 ## 2. 구성
 
@@ -56,8 +57,8 @@ collection/domain/CollectorRequestCounterRepository
 
 - **플랫폼당 동시 1건**: 프로세스 안의 `PlatformThrottle` 한 줄을 모든 작업·재시도·리다이렉트 단계·robots 요청이 지납니다. 다른 프로세스와는 "플랫폼당 활성 실행 하나"(#45)와 실행 잠금으로 나뉩니다.
 - **간격**: 앞 요청이 끝난 뒤 `max(5초, 수집 설정 rate_interval_ms, robots Crawl-delay) × (이 실행에서 429 를 받았으면 2) + 0~1초 무작위`. 5초 하한은 코드 상수라 설정으로 줄일 수 없습니다. robots.txt 를 읽은 직후에도 Crawl-delay 를 반영해 다음 요청을 미룹니다.
-- **Retry-After**: 429 를 받으면 그 시간이 지나기 전에는 같은 플랫폼에 어떤 요청도 보내지 않습니다. 남은 시간은 `next_request_at` 에 남겨, 프로세스를 바꿔 같은 실행을 재개해도 유지됩니다.
-- **재시작**: 요청을 보낸 뒤 간격을 `crawl_runs.next_request_at` 에 커밋하고, 다음 요청 전에는 그 시각만 읽은 뒤 트랜잭션 밖에서 기다립니다. 같은 프로세스의 동시 1건은 메모리 잠금이 계속 맡습니다.
+- **Retry-After**: 429 를 받으면 그 시간이 지나기 전에는 같은 플랫폼에 어떤 요청도 보내지 않습니다. 남은 시간은 플랫폼 행 `next_request_at` 에 남습니다. 프로세스를 바꿔 같은 실행을 재개할 때와, 그 실행이 끝난 뒤 새 실행을 시작할 때 모두 유지됩니다.
+- **재시작·새 실행**: 요청을 보낸 뒤 플랫폼 행을 한 문장으로 `GREATEST` 갱신합니다. 다음 요청 전에는 그 시각만 읽고, 트랜잭션 밖에서 기다립니다. 실행 잠금 확인은 갱신 전에 합니다. 같은 프로세스의 동시 1건은 메모리 잠금이 계속 맡습니다. 플랫폼당 활성 실행은 하나입니다.
 - **하루 상한**: 보내기 직전에 `collector_daily_requests` 를 한 문장으로 올립니다(한국 시간 날짜, 상한 초과 시 올리지 않음). 상한은 수집 설정 `daily_request_cap`, PROBE 실행은 `min(200, 설정값)`. 닿으면 실행을 `PAUSED` 로 두고 통계에 `haltReason=DAILY_CAP` 을 남깁니다.
 - 요청 수는 실제로 보내지 않은 요청(허용하지 않은 목적지로 판명되어 연결 전에 멈춘 경우)도 셉니다(보수적).
 
@@ -100,7 +101,7 @@ collection/domain/CollectorRequestCounterRepository
 - **중단 요청**(`STOP_REQUESTED`): 보내던 요청은 끝내고 그 결과는 반영하되 새 작업은 넣지 않습니다. 다음 확인에서 `finishStop` 으로 `STOPPED`, 남은 작업은 `SKIPPED`. 대기 중에 요청이 오면 더 보내지 않고 바로 닫습니다.
 - **잠금 상실**: 넘겨받은 쪽이 끝나지 않은 작업을 `PENDING` 으로 되돌리고, 잃은 프로세스는 결과·작업·실행 상태를 쓰지 못합니다(#45 공유 잠금 검사). 수집기는 `LEASE_LOST` 로 아무것도 더 쓰지 않고 끝냅니다.
 - **수집 설정 변경**: 실행 중에 설정이 이 실행을 허용하지 않게 바뀌면(`DISABLED` 등) `PAUSED` 로 두고 끝냅니다. 재개는 #45 규칙대로 거절됩니다.
-- **재개**: `resume(runId)` 는 #45 `acquire` 로 같은 실행을 넘겨받고, robots.txt 를 다시 읽은 뒤 남은 작업만 처리합니다. 끝난 작업은 다시 요청하지 않습니다. 429 횟수가 남아 있으면 간격 2배로 시작합니다. `next_request_at` 이 아직 미래면 그 시각까지 기다린 뒤에 요청합니다.
+- **재개**: `resume(runId)` 는 #45 `acquire` 로 같은 실행을 넘겨받고, robots.txt 를 다시 읽은 뒤 남은 작업만 처리합니다. 끝난 작업은 다시 요청하지 않습니다. 429 횟수가 남아 있으면 간격 2배로 시작합니다. 플랫폼의 `next_request_at` 이 아직 미래면 그 시각까지 기다린 뒤에 요청합니다. 완료·중단·차단으로 실행을 닫아도 이 시각은 남고, 다음 실행이 같은 값을 읽습니다.
 - **정지 사유 기록**: 일시 정지·차단 직전에 `crawl_runs.stats` 에 `haltReason`·`haltMessage`·요청 수·상태별 수를 합칩니다.
 
 ## 10. 어댑터 계약 (`PlatformAdapter`)
@@ -157,9 +158,10 @@ collection/domain/CollectorRequestCounterRepository
 
 | 테스트 | 내용 |
 |---|---|
-| `CollectorEngineIntegrationTest` | 모의 HTTP 서버 + 격리 DB 로 §3~§9 전체: 게이트, PROBE 범위, 간격(리다이렉트·재시도·재개·프로세스 재시작 포함)·Crawl-delay·남은 Retry-After, robots 금지·다시 읽기·읽기 실패, 429 1회·2회, 403·CAPTCHA, 인증 리다이렉트, 목적지 거절, 5xx 재시도 일정, 회로 차단기, 타임아웃·크기·404·파싱 실패 표본(HTML 속성·잘린 본문), 하루 상한, 설정 변경, 대기 중 중단·잠금 연장·잠금 상실, 요청 중 잠금 상실, 네트워크 대기 중 DB 연결 0, 쿠키 값 미기록 |
+| `CollectorEngineIntegrationTest` | 모의 HTTP 서버 + 격리 DB 로 §3~§9 전체: 게이트, PROBE 범위, 간격(리다이렉트·재시도·재개·프로세스 재시작·완료 뒤 새 실행·중단 뒤 Retry-After·차단 뒤 남은 대기·동시 시작 포함)·Crawl-delay·남은 Retry-After, robots 금지·다시 읽기·읽기 실패, 429 1회·2회, 403·CAPTCHA, 인증 리다이렉트, 목적지 거절, 5xx 재시도 일정, 회로 차단기, 타임아웃·크기·404·파싱 실패 표본(HTML 속성·잘린 본문), 하루 상한, 설정 변경, 대기 중 중단·잠금 연장·잠금 상실, 요청 중 잠금 상실, 네트워크 대기 중 DB 연결 0, 쿠키 값 미기록 |
 | `HttpTransportTest` | 고정 헤더·Set-Cookie 버림, 리다이렉트 미추적, 크기 상한(길이·청크·gzip 폭탄), 전체 시간 제한, 운영 네트워크의 로컬·사설·메타데이터·혼합 해석 거절(연결 전), 트랜잭션 안 호출 거절, TLS 인증서 호스트 이름 확인(테스트용 자체 서명 인증서) |
 | `RobotsRulesTest`, `PublicAddressPolicyTest`, `PlatformThrottleTest`, `CollectorCoreUnitTest`, `CollectCommandTest` | robots 해석, IP 판정, 동시 1건·간격, 재시도 계산·Retry-After·회로 차단기·사용자 에이전트·화면 판단·로그 가림, 명령 프로필·인자 |
 
-- 간격은 가상 시계로 잽니다. 가상 시계가 흐른 만큼 대기 중인 작업의 `next_attempt_at` 을 당겨 DB 시각과 맞춥니다(테스트 도우미).
+- 간격은 가상 시계로 잽니다. 가상 시계가 흐른 만큼 대기 중인 작업의 `next_attempt_at` 과 실행·플랫폼의 `next_request_at` 을 당겨 DB 시각과 맞춥니다(테스트 도우미).
 - 실제 사이트·DNS 는 쓰지 않습니다. 테스트 해석기는 `*.mock.test` 만 해석합니다.
+- #68 회귀는 메모리를 공유하지 않는 엔진으로 확인했습니다. 운영체제 프로세스 두 개를 따로 띄운 확인과 실제 플랫폼 요청은 하지 않았습니다.

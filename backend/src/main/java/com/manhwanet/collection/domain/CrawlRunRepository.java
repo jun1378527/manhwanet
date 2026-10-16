@@ -132,20 +132,39 @@ public class CrawlRunRepository {
                 new MapSqlParameterSource().addValue("id", id).addValue("robots", robotsSha256, java.sql.Types.VARCHAR));
     }
 
-    /** #46: 다음 요청은 지금부터 적어도 millis 뒤. 이미 더 늦은 시각이 있으면 유지한다 */
+    /**
+     * #46, #68: 플랫폼의 다음 요청 시각을 지금부터 적어도 millis 뒤로 미룬다.
+     * GREATEST 라서 이미 더 늦은 시각은 당기지 않는다. 실행 행에도 같은 시각을 남기고, 허용 판단은 플랫폼 행만 본다.
+     */
     public void postponeNextRequest(long id, long millis) {
         update("""
-                UPDATE crawl_runs SET next_request_at = GREATEST(COALESCE(next_request_at, now()),
-                    now() + (:millis * INTERVAL '1 millisecond'))
-                WHERE id = :id""",
+                WITH gate AS (
+                    UPDATE platform_collection_policies AS policy
+                    SET next_request_at = GREATEST(
+                            COALESCE(policy.next_request_at, now()),
+                            COALESCE(run.next_request_at, now()),
+                            now() + (:millis * INTERVAL '1 millisecond'))
+                    FROM crawl_runs AS run
+                    WHERE run.id = :id AND policy.platform_code = run.platform_code
+                    RETURNING policy.next_request_at
+                )
+                UPDATE crawl_runs AS current
+                SET next_request_at = gate.next_request_at
+                FROM gate
+                WHERE current.id = :id""",
                 new MapSqlParameterSource().addValue("id", id).addValue("millis", millis));
     }
 
-    /** #46: 다음 요청까지 남은 밀리초. 시각이 없거나 지났으면 0. 행 잠금은 잡지 않는다 */
+    /**
+     * #46, #68: 이 실행 플랫폼에서 다음 요청까지 남은 밀리초. 시각이 없거나 지났으면 0.
+     * 실행이 달라도 같은 플랫폼 행을 읽는다. 행 잠금은 잡지 않는다.
+     */
     public long millisUntilNextRequest(long id) {
         Long millis = jdbc.queryForObject("""
-                SELECT COALESCE(CEIL(EXTRACT(EPOCH FROM (next_request_at - now())) * 1000), 0)::bigint
-                FROM crawl_runs WHERE id = :id""",
+                SELECT COALESCE(CEIL(EXTRACT(EPOCH FROM (policy.next_request_at - now())) * 1000), 0)::bigint
+                FROM crawl_runs AS run
+                JOIN platform_collection_policies AS policy ON policy.platform_code = run.platform_code
+                WHERE run.id = :id""",
                 new MapSqlParameterSource("id", id), Long.class);
         return millis == null || millis < 0 ? 0 : millis;
     }

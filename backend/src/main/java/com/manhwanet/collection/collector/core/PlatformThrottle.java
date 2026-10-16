@@ -14,7 +14,8 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>Retry-After: {@link #delayAtLeast} 로 다음 요청 가능 시각을 뒤로 민다.</li>
  * </ul>
  * 기다리는 동안 {@link WaitGuard} 로 잠금 연장·중단 요청을 확인한다. 다른 프로세스와의 순서는 "플랫폼당 활성 실행 하나"와 실행 잠금이 보장한다.
- * 다음 허용 시각 자체는 실행 행(`next_request_at`)에도 남겨, 이 메모리 상태가 없는 재개 프로세스도 남은 간격을 지킨다.
+ * 다음 허용 시각 자체는 플랫폼 행(`platform_collection_policies.next_request_at`)에 남겨,
+ * 이 메모리 상태가 없는 재개와 새 실행도 남은 간격을 지킨다.
  */
 public class PlatformThrottle {
 

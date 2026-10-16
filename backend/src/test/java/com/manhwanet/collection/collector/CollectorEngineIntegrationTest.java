@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.manhwanet.collection.application.CrawlRunActiveException;
 import com.manhwanet.collection.application.CrawlRunService;
 import com.manhwanet.collection.application.CrawlTaskService;
 import com.manhwanet.collection.application.StagingIngestService;
@@ -36,6 +37,12 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.random.RandomGenerator;
@@ -141,6 +148,8 @@ class CollectorEngineIntegrationTest {
                     + "WHERE status = 'PENDING'", ms / 1000.0);
             // 가상 시계가 흐른 만큼 저장된 다음 요청 시각도 당긴다(DB now() 와 맞춤)
             jdbc.update("UPDATE crawl_runs SET next_request_at = next_request_at - make_interval(secs => ?) "
+                    + "WHERE next_request_at IS NOT NULL", ms / 1000.0);
+            jdbc.update("UPDATE platform_collection_policies SET next_request_at = next_request_at - make_interval(secs => ?) "
                     + "WHERE next_request_at IS NOT NULL", ms / 1000.0);
         });
         site.ok("/robots.txt", ROBOTS);
@@ -709,8 +718,7 @@ class CollectorEngineIntegrationTest {
         long limitedAt = site.requests().stream().filter(r -> "/books/1".equals(r.target())).findFirst().orElseThrow().atMillis();
         // 작업 재시도 시각은 이미 지난 것으로 두고, 남은 대기는 요청 간격 저장값만 보게 한다
         jdbc.update("UPDATE crawl_tasks SET next_attempt_at = now() - interval '1 second' WHERE status = 'PENDING'");
-        long stored = jdbc.queryForObject(
-                "SELECT CEIL(EXTRACT(EPOCH FROM (next_request_at - now())) * 1000)::bigint FROM crawl_runs", Long.class);
+        long stored = platformWaitMillis();
         assertThat(stored).isBetween(25_000L, 30_000L);
         policy("ENABLED");
         site.on("/books/1", ex -> send(ex, 200, "title=1"));
@@ -721,11 +729,150 @@ class CollectorEngineIntegrationTest {
         assertThat(nextAt - limitedAt).isBetween(stored - 1_000, stored + 1_000);
     }
 
+    @Test
+    void newProcessRunKeepsTheMinimumGapAfterCompletion() {
+        site.ok("/sitemap.xml", "detail https://ridi.mock.test/books/1\n");
+        site.ok("/books/1", "title=1");
+
+        RunReport first = engine.start("RIDI", RunKind.FULL, OWNER);
+
+        assertThat(first.status()).isEqualTo(RunStatus.COMPLETED);
+        long lastAt = site.requests().get(site.requests().size() - 1).atMillis();
+        long stored = platformWaitMillis();
+        assertThat(stored).isBetween(5_000L, 6_000L);
+        int before = site.requests().size();
+
+        RunReport second = freshEngine().start("RIDI", RunKind.FULL, OTHER);
+
+        assertThat(second.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(second.runId()).isNotEqualTo(first.runId());
+        assertThat(site.requests().get(before).atMillis() - lastAt).isGreaterThanOrEqualTo(5_000);
+        assertGapsAtLeast(5_000);
+    }
+
+    @Test
+    void newProcessRunKeepsRetryAfterAfterStop() {
+        site.ok("/sitemap.xml", "detail https://ridi.mock.test/books/1\n");
+        site.on("/books/1", ex -> {
+            ex.getResponseHeaders().add("Retry-After", "30");
+            send(ex, 429, "slow");
+            policy("DISABLED");
+        });
+        RunReport paused = engine.start("RIDI", RunKind.FULL, OWNER);
+        assertThat(paused.status()).isEqualTo(RunStatus.PAUSED);
+        long limitedAt = site.requests().stream().filter(r -> "/books/1".equals(r.target())).findFirst().orElseThrow().atMillis();
+        jdbc.update("UPDATE crawl_tasks SET next_attempt_at = now() - interval '1 second' WHERE status = 'PENDING'");
+        long stored = platformWaitMillis();
+        assertThat(stored).isBetween(25_000L, 30_000L);
+
+        runs.requestStop(paused.runId(), "점검", adminId);
+        assertThat(jdbc.queryForObject("SELECT status FROM crawl_runs WHERE id = ?", String.class, paused.runId())).isEqualTo("STOPPED");
+        assertThat(platformWaitMillis()).isBetween(stored - 1_000, stored + 1_000);
+
+        policy("ENABLED");
+        site.on("/books/1", ex -> send(ex, 200, "title=1"));
+        int before = site.requests().size();
+        RunReport second = freshEngine().start("RIDI", RunKind.FULL, OTHER);
+
+        assertThat(second.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(site.requests().get(before).atMillis() - limitedAt).isBetween(stored - 1_000, stored + 1_000);
+    }
+
+    @Test
+    void blockedRunLeavesThePlatformWait() {
+        site.ok("/sitemap.xml", "detail https://ridi.mock.test/books/1\ndetail https://ridi.mock.test/books/2\n");
+        site.on("/books/1", status(429, "slow", "Retry-After", "30"));
+        site.on("/books/2", status(429, "slow", "Retry-After", "30"));
+
+        RunReport blocked = engine.start("RIDI", RunKind.FULL, OWNER);
+
+        assertThat(blocked.status()).isEqualTo(RunStatus.BLOCKED);
+        long stored = platformWaitMillis();
+        assertThat(stored).isBetween(25_000L, 30_000L);
+        runs.requestStop(blocked.runId(), "점검", adminId);
+        assertThat(jdbc.queryForObject("SELECT status FROM crawl_runs WHERE id = ?", String.class, blocked.runId())).isEqualTo("STOPPED");
+        assertThat(platformWaitMillis()).isBetween(stored - 1_000, stored + 1_000);
+
+        site.ok("/books/1", "title=1");
+        site.ok("/books/2", "title=2");
+        long limitedAt = site.requests().get(site.requests().size() - 1).atMillis();
+        int before = site.requests().size();
+        RunReport second = freshEngine().start("RIDI", RunKind.FULL, OTHER);
+
+        assertThat(second.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(site.requests().get(before).atMillis() - limitedAt).isGreaterThanOrEqualTo(stored - 1_000);
+    }
+
+    @Test
+    void concurrentNewRunsKeepTheGapAndOnlyOneStarts() throws Exception {
+        site.ok("/sitemap.xml", "detail https://ridi.mock.test/books/1\n");
+        site.ok("/books/1", "title=1");
+        RunReport first = engine.start("RIDI", RunKind.FULL, OWNER);
+        assertThat(first.status()).isEqualTo(RunStatus.COMPLETED);
+        long lastAt = site.requests().get(site.requests().size() - 1).atMillis();
+        int before = site.requests().size();
+
+        CountDownLatch winnerHolding = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        site.on("/robots.txt", ex -> {
+            send(ex, 200, ROBOTS);
+            winnerHolding.countDown();
+            try {
+                if (!release.await(20, TimeUnit.SECONDS)) {
+                    throw new IOException("동시 시작 대기가 끝나지 않았습니다.");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("동시 시작 대기가 끊겼습니다.", e);
+            }
+        });
+
+        CyclicBarrier startTogether = new CyclicBarrier(2);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Object> left = pool.submit(() -> startQuietly(startTogether, OTHER));
+            Future<Object> right = pool.submit(() -> startQuietly(startTogether, "collector-c"));
+            assertThat(winnerHolding.await(20, TimeUnit.SECONDS)).isTrue();
+            assertThat(site.requests().get(before).atMillis() - lastAt).isGreaterThanOrEqualTo(5_000);
+            Object early = left.isDone() ? left.get() : right.isDone() ? right.get() : null;
+            assertThat(early).isInstanceOf(CrawlRunActiveException.class);
+            release.countDown();
+            Object leftResult = left.get(30, TimeUnit.SECONDS);
+            Object rightResult = right.get(30, TimeUnit.SECONDS);
+            List<Object> results = List.of(leftResult, rightResult);
+            assertThat(results).anySatisfy(result -> assertThat(result).isInstanceOf(CrawlRunActiveException.class));
+            assertThat(results).anySatisfy(result -> {
+                assertThat(result).isInstanceOf(RunReport.class);
+                assertThat(((RunReport) result).status()).isEqualTo(RunStatus.COMPLETED);
+            });
+            assertThat(count("crawl_runs")).isEqualTo(2);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
     /** 메모리 간격을 공유하지 않는 새 프로세스 */
     private CollectorEngine freshEngine() {
         return new CollectorEngine(properties, adapters, platformRepository, policyRepository, runs, taskService,
                 ingestService, counterRepository, transport, new PlatformThrottle(clock), clock, random,
                 transactionManager, objectMapper);
+    }
+
+    private Object startQuietly(CyclicBarrier barrier, String owner) {
+        try {
+            barrier.await(20, TimeUnit.SECONDS);
+            return freshEngine().start("RIDI", RunKind.FULL, owner);
+        } catch (Exception e) {
+            return e;
+        }
+    }
+
+    private long platformWaitMillis() {
+        Long value = jdbc.queryForObject("""
+                SELECT CEIL(EXTRACT(EPOCH FROM (next_request_at - now())) * 1000)::bigint
+                FROM platform_collection_policies WHERE platform_code = 'RIDI'""", Long.class);
+        return value == null ? 0 : value;
     }
 
     // ---------- 도우미 ----------

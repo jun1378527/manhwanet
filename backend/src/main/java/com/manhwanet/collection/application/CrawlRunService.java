@@ -230,8 +230,9 @@ public class CrawlRunService {
     }
 
     /**
-     * #46: 같은 플랫폼의 다음 요청을 지금부터 적어도 millis 뒤로 미룬다. 잠금을 쥔 프로세스만.
+     * #46, #68: 플랫폼의 다음 요청 시각을 지금부터 적어도 millis 뒤로 미룬다. 잠금을 쥔 프로세스만.
      * 호출이 끝나면 트랜잭션을 놓으므로, 기다리는 쪽은 이 메서드 밖에서 잔다.
+     * 실행이 끝나거나 중단·차단돼도 이 시각은 지우지 않는다.
      */
     @Transactional
     public void postponeNextRequest(long runId, String owner, long millis) {
@@ -242,7 +243,7 @@ public class CrawlRunService {
         runRepository.postponeNextRequest(runId, millis);
     }
 
-    /** #46: 다음 요청까지 남은 밀리초. 읽기만 하고 행을 잠그지 않는다 */
+    /** #46, #68: 플랫폼 행 기준 남은 밀리초. 읽기만 하고 행을 잠그지 않는다 */
     @Transactional(readOnly = true)
     public long millisUntilNextRequest(long runId) {
         return runRepository.millisUntilNextRequest(runId);

@@ -66,7 +66,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li>모든 쓰기는 #45 서비스가 실행 잠금을 확인한다. 잠금을 잃으면 아무것도 더 쓰지 않고 끝낸다.</li>
  *   <li>수집 설정이 DISABLED 면 실행을 만들지 않고 요청도 보내지 않는다. PROBE 실행은 robots.txt 와 SITEMAP 작업만 요청한다.</li>
  *   <li>요청 간격은 max(5초, 수집 설정 간격, robots Crawl-delay) × (429 뒤 2) + 0~1초 무작위이고, 재시도·리다이렉트·robots·여러 작업 모두에 적용한다.
- *       다음 허용 시각은 실행 행에 남겨, 프로세스가 바뀌어 재개해도 남은 간격·Retry-After 를 지킨다.</li>
+ *       다음 허용 시각은 플랫폼 행에 남긴다. 같은 실행을 재개할 때와, 실행이 끝난 뒤 새 실행을 시작할 때 모두 그 시각을 읽는다.</li>
  * </ul>
  * 일반 웹 서버는 이 클래스를 부르지 않는다(collector 프로필의 CollectCommand 만 부름).
  */
@@ -583,7 +583,7 @@ public class CollectorEngine {
             return baseIntervalMillis() + random.nextInt(JITTER_MILLIS + 1);
         }
 
-        /** DB 에 남은 간격·Retry-After 가 있으면 그 시각까지 잔다. 읽는 트랜잭션은 대기 전에 끝난다 */
+        /** 플랫폼 행에 남은 간격·Retry-After 가 있으면 그 시각까지 잔다. 읽는 트랜잭션은 대기 전에 끝난다 */
         private void awaitStoredGap() {
             while (true) {
                 long remaining = runService.millisUntilNextRequest(runId);
@@ -594,7 +594,7 @@ public class CollectorEngine {
             }
         }
 
-        /** 다음 허용 시각을 실행 행에 남긴다. 잠금을 잃었으면 결과 처리 쪽에서 멈추게 예외를 올린다 */
+        /** 다음 허용 시각을 플랫폼 행에 남긴다. 잠금을 잃었으면 결과 처리 쪽에서 멈추게 예외를 올린다 */
         private void rememberGap(long millis) {
             runService.postponeNextRequest(runId, owner, millis);
         }

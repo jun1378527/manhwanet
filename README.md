@@ -44,7 +44,7 @@ manhwanet/
 │       │   ├── application.yml      # 공통 설정
 │       │   ├── application-local.yml# 로컬 프로필 (기본)
 │       │   ├── application-test.yml # 테스트 프로필
-│       │   └── db/migration/        # Flyway 마이그레이션 (V1__init ~ V5__create_work_reviews)
+│       │   └── db/migration/        # Flyway 마이그레이션 (V1~V17)
 │       └── test/java/com/manhwanet/
 ├── frontend/                        # Next.js + TypeScript + App Router
 │   ├── src/app/                     # 화면 (/, /works, /works/[id], /login, /signup) — error / not-found 포함

@@ -119,6 +119,8 @@ class StagingReviewDemoTest {
                     ms / 1000.0);
             jdbc.update("UPDATE crawl_runs SET next_request_at = next_request_at - make_interval(secs => ?) "
                     + "WHERE next_request_at IS NOT NULL", ms / 1000.0);
+            jdbc.update("UPDATE platform_collection_policies SET next_request_at = next_request_at - make_interval(secs => ?) "
+                    + "WHERE next_request_at IS NOT NULL", ms / 1000.0);
         });
         site.ok("/robots.txt", "User-agent: *\nAllow: /\n");
     }
