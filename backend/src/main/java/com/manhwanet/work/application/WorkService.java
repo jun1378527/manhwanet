@@ -40,6 +40,11 @@ import com.manhwanet.work.domain.WorkRepository;
 import com.manhwanet.work.domain.WorkTitle;
 import com.manhwanet.work.domain.WorkTitleDraft;
 import com.manhwanet.work.domain.WorkTitleRepository;
+import com.manhwanet.work.domain.WorkVisibility;
+import com.manhwanet.work.dto.ChangeVisibilityRequest;
+import com.manhwanet.platform.domain.AgeClass;
+import com.manhwanet.platform.domain.ListingRow;
+import com.manhwanet.platform.domain.ListingStatus;
 import com.manhwanet.work.dto.AdminWorkDetailResponse;
 import com.manhwanet.work.dto.CreateWorkRequest;
 import com.manhwanet.work.dto.CreditResponse;
@@ -128,6 +133,15 @@ public class WorkService {
      */
     @Transactional
     public AdminWorkDetailResponse register(CreateWorkRequest request, long actorId) {
+        return register(request, actorId, WorkVisibility.PUBLIC);
+    }
+
+    /**
+     * 공개 상태를 정해 등록한다(#41·#51). 수집 대기 항목에서 만든 작품은 HIDDEN 으로 INSERT 해 공개 경로에 한 번도 드러나지 않는다.
+     * 관리자 등록 API(POST /admin/works)는 지금처럼 PUBLIC 이다.
+     */
+    @Transactional
+    public AdminWorkDetailResponse register(CreateWorkRequest request, long actorId, WorkVisibility visibility) {
         List<ApiError.FieldError> errors = new ArrayList<>();
         AdminInputs in = new AdminInputs(errors);
 
@@ -156,10 +170,12 @@ public class WorkService {
             throw new InvalidInputException(errors);
         }
 
-        Work work = save(Work.create(workFormat, originCountry, description, titles, credits));
+        Work work = save(Work.create(workFormat, originCountry, description, titles, credits, visibility));
         long workId = work.getId();
+        Map<String, Object> created = snapshot(workFormat.name(), originCountry, description, titles, credits);
+        created.put("visibility", visibility.name());
         changeLog.record(ChangeEntityType.WORK, String.valueOf(workId), ChangeAction.CREATE, workId, null, null,
-                snapshot(workFormat.name(), originCountry, description, titles, credits), reason, actorId);
+                created, reason, actorId);
         workListingService.insertForNewWork(workId, listings, actorId, reason);
         for (ExternalIdDraft externalId : externalIds) {
             provenanceWriter.addExternalId(ExternalIdOwner.WORK, workId, externalId, actorId, reason);
@@ -169,7 +185,7 @@ public class WorkService {
         }
         provenanceWriter.addEvidence(workId, evidence, actorId, reason);
         // 새 작품에는 별점이 없으므로 집계 SQL 을 실행하지 않는다.
-        return adminDetail(work.getVersion(), toDetail(work, RatingSummaryResponse.EMPTY));
+        return adminDetail(work.getVersion(), work.getVisibility(), toDetail(work, RatingSummaryResponse.EMPTY));
     }
 
     /**
@@ -178,7 +194,9 @@ public class WorkService {
      */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public WorkDetailResponse getWork(Long workId) {
+        // 숨김 작품은 공개 경로에서 없는 작품과 같다(ADMIN 도 관리자 경로로 조회)
         Work work = workRepository.findWithTitlesById(workId)
+                .filter(w -> w.getVisibility() == WorkVisibility.PUBLIC)
                 .orElseThrow(() -> new BusinessException(ErrorCode.WORK_NOT_FOUND));
         RatingSummaryResponse rating = ratingSummaryQuery.findByWorkIds(List.of(work.getId()))
                 .getOrDefault(work.getId(), RatingSummaryResponse.EMPTY);
@@ -192,12 +210,12 @@ public class WorkService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.WORK_NOT_FOUND));
         RatingSummaryResponse rating = ratingSummaryQuery.findByWorkIds(List.of(work.getId()))
                 .getOrDefault(work.getId(), RatingSummaryResponse.EMPTY);
-        return adminDetail(work.getVersion(), toDetail(work, rating));
+        return adminDetail(work.getVersion(), work.getVisibility(), toDetail(work, rating));
     }
 
-    private AdminWorkDetailResponse adminDetail(long version, WorkDetailResponse detail) {
+    private AdminWorkDetailResponse adminDetail(long version, WorkVisibility visibility, WorkDetailResponse detail) {
         long workId = detail.id();
-        return AdminWorkDetailResponse.of(version, detail,
+        return AdminWorkDetailResponse.of(version, visibility, detail,
                 listingRepository.findByWorkId(workId).stream().map(ListingResponse::from).toList(),
                 provenanceQuery.externalIds(ExternalIdOwner.WORK, workId),
                 provenanceQuery.links(workId),
@@ -306,6 +324,82 @@ public class WorkService {
         return getAdminWork(workId);
     }
 
+    /** #41: 공개 경로에서 본 작품 상태 */
+    public enum Access {
+        PUBLIC, HIDDEN, MISSING
+    }
+
+    /** 공개 경로에서 본 작품 상태(읽기). 별점·리뷰 조회가 쓴다 */
+    public Access access(Long workId) {
+        if (workId == null || workId <= 0) {
+            return Access.MISSING;
+        }
+        return workRepository.findVisibility(workId)
+                .map(v -> WorkVisibility.valueOf(v) == WorkVisibility.PUBLIC ? Access.PUBLIC : Access.HIDDEN)
+                .orElse(Access.MISSING);
+    }
+
+    /**
+     * 별점·리뷰를 새로 쓰거나 고치기 전 확인. 공개 작품이 아니면 없는 작품과 같은 404 WORK_NOT_FOUND.
+     * FOR SHARE 로 읽어 호출 트랜잭션이 끝날 때까지 숨김 전환과 직렬화한다(호출자 트랜잭션 필수).
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void requirePublicForWrite(Long workId) {
+        boolean visible = workId != null && workId > 0 && workRepository.findVisibilityForShare(workId)
+                .map(v -> WorkVisibility.valueOf(v) == WorkVisibility.PUBLIC).orElse(false);
+        if (!visible) {
+            throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
+        }
+    }
+
+    /**
+     * 공개 상태 변경(#41 최소 범위). POST /admin/works/{workId}/visibility
+     * <ul>
+     *   <li>version 이 같을 때만 바꾸고 1 올린다(다르면 409 WORK_VERSION_CONFLICT). 사유 필수, 변경 기록(WORK·STATUS_CHANGE)</li>
+     *   <li>같은 상태로 보내면 version·기록을 그대로 두고 현재 상세를 돌려준다</li>
+     *   <li>PUBLIC 전환은 ACTIVE 연결이 하나 이상 있고 모두 GENERAL 일 때만. ADULT·UNKNOWN 공개 표시는 미결정(D-15)이라
+     *       409 WORK_PUBLICATION_BLOCKED. HIDDEN 전환은 언제나 가능</li>
+     *   <li>별점·리뷰·연결·작품 ID 는 바꾸지 않는다</li>
+     * </ul>
+     */
+    @Transactional
+    public AdminWorkDetailResponse changeVisibility(Long workId, ChangeVisibilityRequest request, long actorId) {
+        AdminInputs in = new AdminInputs();
+        Long version = in.version(request == null ? null : request.version());
+        WorkVisibility target = in.enumValue(request == null ? null : request.visibility(), WorkVisibility.class, "visibility", true);
+        String reason = in.reason(request == null ? null : request.reason(), true);
+        in.throwIfAny();
+        LockedWork current = workRepository.lockById(workId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.WORK_NOT_FOUND));
+        if (!current.getVersion().equals(version)) {
+            throw new VersionConflictException(ErrorCode.WORK_VERSION_CONFLICT, current.getVersion());
+        }
+        WorkVisibility before = WorkVisibility.valueOf(current.getVisibility());
+        if (before == target) {
+            return getAdminWork(workId);
+        }
+        if (target == WorkVisibility.PUBLIC) {
+            requirePublishable(workId);
+        }
+        if (workRepository.updateVisibility(workId, version, target.name()) != 1) {
+            throw new IllegalStateException("locked work visibility was not updated: " + workId);
+        }
+        changeLog.record(ChangeEntityType.WORK, String.valueOf(workId), ChangeAction.STATUS_CHANGE, workId, null,
+                Map.of("visibility", before.name()), Map.of("visibility", target.name()), reason, actorId);
+        return getAdminWork(workId);
+    }
+
+    private void requirePublishable(long workId) {
+        List<ListingRow> active = listingRepository.findByWorkId(workId).stream()
+                .filter(l -> l.status() == ListingStatus.ACTIVE).toList();
+        List<String> notGeneral = active.stream().filter(l -> l.ageClass() != AgeClass.GENERAL)
+                .map(l -> l.platformCode() + ":" + l.platformWorkId() + "=" + l.ageClass()).toList();
+        if (active.isEmpty() || !notGeneral.isEmpty()) {
+            throw new BusinessException(ErrorCode.WORK_PUBLICATION_BLOCKED, ErrorCode.WORK_PUBLICATION_BLOCKED.getMessage()
+                    + (active.isEmpty() ? " (ACTIVE 플랫폼 연결이 없어 등급을 확인할 수 없음)" : " (GENERAL 이 아닌 연결 " + notGeneral + ")"));
+        }
+    }
+
     /** 작품 존재 여부. 다른 도메인(rating)이 작품 ID를 검증할 때 사용한다. */
     public boolean exists(Long workId) {
         return workId != null && workId > 0 && workRepository.existsById(workId);
@@ -318,7 +412,7 @@ public class WorkService {
      */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResponse<WorkSummaryResponse> getWorks(Pageable pageable) {
-        Page<Work> page = workRepository.findAll(pageable);
+        Page<Work> page = workRepository.findAllByVisibility(WorkVisibility.PUBLIC, pageable);
         if (page.isEmpty()) {
             return PageResponse.of(page, List.of());
         }

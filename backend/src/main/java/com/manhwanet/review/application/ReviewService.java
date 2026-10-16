@@ -52,10 +52,17 @@ public class ReviewService {
         this.workService = workService;
     }
 
+    /** 내 리뷰. 숨김 작품(#41)은 내 리뷰가 있을 때만 돌려주고(작성자 본인 조회 유지), 없으면 없는 작품과 같은 404 다. */
     public MyReviewResponse getMyReview(Long userId, Long workId) {
-        requireWork(workId);
-        return workReviewRepository.findByUserIdAndWorkId(userId, workId)
-                .map(review -> new MyReviewResponse(workId, ReviewResponse.from(review)))
+        WorkService.Access access = workService.access(workId);
+        if (access == WorkService.Access.MISSING) {
+            throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
+        }
+        Optional<WorkReview> mine = workReviewRepository.findByUserIdAndWorkId(userId, workId);
+        if (access == WorkService.Access.HIDDEN && mine.isEmpty()) {
+            throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
+        }
+        return mine.map(review -> new MyReviewResponse(workId, ReviewResponse.from(review)))
                 .orElseGet(() -> MyReviewResponse.none(workId));
     }
 
@@ -66,7 +73,7 @@ public class ReviewService {
         String body = body(request == null ? null : request.body(), errors);
         Boolean containsSpoiler = spoiler(request == null ? null : request.containsSpoiler(), errors);
         throwIfAny(errors);
-        requireWork(workId);
+        workService.requirePublicForWrite(workId);
 
         int inserted;
         try {
@@ -95,7 +102,8 @@ public class ReviewService {
         Long version = integer(request == null ? null : request.version(), "version", 0,
                 VERSION_REQUIRED, VERSION_INVALID, errors);
         throwIfAny(errors);
-        requireWork(workId);
+        // 숨김 작품의 리뷰는 고치지 않는다(없는 작품과 같은 404). 숨김 전환과 직렬화
+        workService.requirePublicForWrite(workId);
 
         LockedReview current = lockCurrent(userId, workId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.REVIEW_NOT_FOUND));
@@ -116,10 +124,17 @@ public class ReviewService {
         requireRange(reviewId, "reviewId", 1, REVIEW_ID_REQUIRED, REVIEW_ID_INVALID, errors);
         requireRange(version, "version", 0, VERSION_REQUIRED, VERSION_INVALID, errors);
         throwIfAny(errors);
-        requireWork(workId);
+        WorkService.Access access = workService.access(workId);
+        if (access == WorkService.Access.MISSING) {
+            throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
+        }
 
         Optional<LockedReview> current = lockCurrent(userId, workId);
         if (current.isEmpty()) {
+            // 숨김 작품(#41)은 내 리뷰가 있을 때만 지울 수 있고(작성자 본인 삭제 유지), 없으면 없는 작품과 같다
+            if (access == WorkService.Access.HIDDEN) {
+                throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
+            }
             return;
         }
         requireSameReview(current.get(), reviewId, version);
@@ -150,12 +165,6 @@ public class ReviewService {
         WorkReview review = workReviewRepository.findByUserIdAndWorkId(userId, workId)
                 .orElseThrow(() -> new IllegalStateException("review not found right after write"));
         return new MyReviewResponse(workId, ReviewResponse.from(review));
-    }
-
-    private void requireWork(Long workId) {
-        if (!workService.exists(workId)) {
-            throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
-        }
     }
 
     private static RuntimeException translateWorkMissing(DataIntegrityViolationException e) {

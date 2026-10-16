@@ -37,7 +37,8 @@ public class ReviewQueryService {
 
     /** @param pageable created_at DESC, id DESC 로 정렬이 고정된 페이지 */
     public PageResponse<PublicReviewResponse> getWorkReviews(Long workId, Pageable pageable) {
-        if (!workService.exists(workId)) {
+        // 숨김 작품(#41)의 공개 리뷰 목록은 없는 작품과 같은 404
+        if (workService.access(workId) != WorkService.Access.PUBLIC) {
             throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
         }
         Page<WorkReview> page = workReviewRepository.findByWorkId(workId, pageable);

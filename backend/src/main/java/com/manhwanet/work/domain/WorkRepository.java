@@ -1,6 +1,8 @@
 package com.manhwanet.work.domain;
 
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -19,7 +21,7 @@ public interface WorkRepository extends JpaRepository<Work, Long> {
      */
     @Query(value = """
             SELECT id AS "id", version AS "version", work_format AS "workFormat",
-                   origin_country AS "originCountry", description AS "description"
+                   origin_country AS "originCountry", description AS "description", visibility AS "visibility"
             FROM works
             WHERE id = :id
             FOR NO KEY UPDATE
@@ -67,5 +69,33 @@ public interface WorkRepository extends JpaRepository<Work, Long> {
         String getOriginCountry();
 
         String getDescription();
+
+        String getVisibility();
     }
+
+    /** #41 공개 목록: PUBLIC 작품만 */
+    Page<Work> findAllByVisibility(WorkVisibility visibility, Pageable pageable);
+
+    /** #41 공개 상태(없으면 빈 값). 읽기 경로용 */
+    @Query(value = "SELECT visibility FROM works WHERE id = :id", nativeQuery = true)
+    Optional<String> findVisibility(@Param("id") Long id);
+
+    /**
+     * #41 별점·리뷰 쓰기 전 공개 상태 확인. FOR SHARE 로 읽어 커밋까지 숨김 전환(FOR NO KEY UPDATE)과 직렬화한다.
+     * 숨기는 중에 새 별점·리뷰가 끼어들지 않는다.
+     */
+    @Query(value = "SELECT visibility FROM works WHERE id = :id FOR SHARE", nativeQuery = true)
+    Optional<String> findVisibilityForShare(@Param("id") Long id);
+
+    /** #41 공개 상태 변경. version 이 기대값과 같을 때만 바꾸고 1 올린다 */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE works
+            SET visibility = :visibility,
+                version = version + 1,
+                updated_at = GREATEST(updated_at, now())
+            WHERE id = :id AND version = :expectedVersion
+            """, nativeQuery = true)
+    int updateVisibility(@Param("id") Long id, @Param("expectedVersion") long expectedVersion,
+            @Param("visibility") String visibility);
 }

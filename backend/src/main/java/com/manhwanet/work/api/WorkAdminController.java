@@ -27,6 +27,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
  *   <li>POST /api/v1/admin/works: 등록(근거 필수, 연결·외부 ID·링크 선택, #40). 응답은 관리자용 상세</li>
  *   <li>GET /api/v1/admin/works/{workId}: 관리자용 상세(version, 연결·외부 ID·링크·근거 포함)</li>
  *   <li>PUT /api/v1/admin/works/{workId}: 핵심 정보 전체 교체(version 일치 시에만, 다르면 409. reason 필수)</li>
+ *   <li>POST /api/v1/admin/works/{workId}/visibility: 공개 상태 PUBLIC·HIDDEN 변경(version·reason 필수, #41)</li>
  * </ul>
  * 삭제 API 는 두지 않는다(별점·리뷰 보존, docs/work-platform-admin-spec.md §7).
  */
@@ -61,5 +62,12 @@ public class WorkAdminController {
             @PathVariable Long workId, @Valid @RequestBody UpdateWorkRequest request,
             @AuthenticationPrincipal AuthenticatedUser principal) {
         return ApiResponse.success(workService.update(workId, request, AdminPrincipal.id(principal)));
+    }
+
+    @PostMapping("/{workId}/visibility")
+    public ApiResponse<AdminWorkDetailResponse> changeVisibility(@PathVariable Long workId,
+            @RequestBody com.manhwanet.work.dto.ChangeVisibilityRequest request,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        return ApiResponse.success(workService.changeVisibility(workId, request, AdminPrincipal.id(principal)));
     }
 }

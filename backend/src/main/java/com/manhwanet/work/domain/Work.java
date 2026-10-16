@@ -43,6 +43,13 @@ public class Work extends BaseTimeEntity {
     @Column(name = "version", nullable = false, insertable = false, updatable = false)
     private Long version = 0L;
 
+    /**
+     * 공개 상태(#41). 등록 때 정해 INSERT 에 넣고(처음부터 HIDDEN 으로 저장 가능), 바꿀 때는 조건부 UPDATE(WorkRepository)만 쓴다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "visibility", nullable = false, length = 20, updatable = false)
+    private WorkVisibility visibility = WorkVisibility.PUBLIC;
+
     @OneToMany(mappedBy = "work", cascade = CascadeType.PERSIST)
     private List<WorkTitle> titles = new ArrayList<>();
 
@@ -73,10 +80,22 @@ public class Work extends BaseTimeEntity {
             String description,
             List<WorkTitleDraft> titles,
             List<WorkCreditDraft> credits) {
+        return create(workFormat, originCountry, description, titles, credits, WorkVisibility.PUBLIC);
+    }
+
+    /** 공개 상태를 정해 생성한다. HIDDEN 이면 공개 경로에 한 번도 드러나지 않은 채 저장된다 */
+    public static Work create(
+            WorkFormat workFormat,
+            String originCountry,
+            String description,
+            List<WorkTitleDraft> titles,
+            List<WorkCreditDraft> credits,
+            WorkVisibility visibility) {
         validateTitles(titles);
         validateCredits(credits);
 
         Work work = new Work(workFormat, originCountry, description);
+        work.visibility = Objects.requireNonNull(visibility);
         titles.forEach(title -> work.titles.add(
                 new WorkTitle(work, title.title(), title.languageCode(), title.primary())));
         credits.forEach(credit -> work.creators.add(
@@ -132,6 +151,10 @@ public class Work extends BaseTimeEntity {
 
     public String getDescription() {
         return description;
+    }
+
+    public WorkVisibility getVisibility() {
+        return visibility;
     }
 
     public Long getVersion() {

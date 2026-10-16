@@ -198,7 +198,7 @@ cd backend
 # 실행 기록: backend\build\reports\demo\staging-review-demo.md
 ```
 
-- 흐름: 모의 수집 → 후보 확인 → 기존 작품 연결(LINK_EXISTING) → 새 작품 등록(CREATE_WORK) → 반복 승인 409 → 성인 등급 새 작품 등록 거절·보류 → 검수 중 재수집 409 → 최신 내용으로 다시 승인
+- 흐름: 모의 수집 → 후보 확인 → 기존 작품 연결(LINK_EXISTING) → 새 작품을 숨김(HIDDEN)으로 등록(CREATE_WORK) → 반복 승인 409 → 숨김 중 공개 경로 404 → 관리자 명시적 공개 → 독자 별점·리뷰 → 다시 숨김·공개(기록 보존) → 성인 등급 숨김 등록·공개 전환 409 → 검수 중 재수집 409 → 최신 내용으로 다시 승인
 
 ### 3. Frontend 실행
 
@@ -278,6 +278,7 @@ cd backend
 | `CollectionAdminApiIntegrationTest` | 익명 401·USER 403·CSRF 누락 403, 수집 설정 사유·version·변경 기록·활성 실행 경고, 실행·staging 조회, 중단 요청·기록, 큰 ID·잘못된 조회 400 (#45) | O |
 | `CollectorEngineIntegrationTest` | 수집기 공통 기반(모의 HTTP 서버 127.0.0.1·격리 DB): `DISABLED` 실행 없음·요청 없음, `PROBE` 는 robots·사이트맵만, 웹 컨텍스트에 수집 명령 없음, 요청 간격 5초(리다이렉트·재시도·재개 포함)·Crawl-delay, robots 금지·6시간 뒤 다시 읽기·읽기 실패 시 차단, 429 Retry-After·간격 2배·2회째 차단, 403·CAPTCHA 즉시 차단, 로그인·성인·결제 리다이렉트 미추적(GATED), 허용하지 않은 호스트·사설 IP·http·다른 포트 리다이렉트 거절, 5xx 30초·2분·8분·30분 재시도 뒤 실패, 회로 차단기, 타임아웃·크기 상한·404·파싱 실패 표본 가림, 하루 상한 일시 정지, 설정 끄면 일시 정지, 대기 중 중단 요청·잠금 연장·잠금 상실, 요청 중 잠금 상실 시 결과 쓰기 거절, 네트워크 대기 중 DB 연결 0, 쿠키·세션 값 로그 미기록 (#46) | O |
 | `HttpTransportTest`, `RobotsRulesTest`, `PublicAddressPolicyTest`, `PlatformThrottleTest`, `CollectorCoreUnitTest`, `CollectCommandTest` | 고정 요청 헤더·Set-Cookie 버림, Content-Length·청크·gzip 크기 상한, 전체 시간 제한, 운영 네트워크의 로컬·사설·메타데이터 주소 거절(연결 전), TLS 인증서 호스트 이름 확인 / robots 해석(RFC 9309) / 목적지 IP 판정 / 동시 1건·간격·Retry-After / 재시도 계산·Retry-After·회로 차단기·사용자 에이전트·차단·인증 화면 판단·로그 가림 / `collector` 프로필 전용·웹 서버 없음·인자 검사 (#46) | X |
+| `WorkVisibilityIntegrationTest` | 작품 공개·숨김(#41 최소): 익명 401·USER 403·CSRF 누락 403·사유 필수·version 409, 숨김 작품의 공개 상세·목록·리뷰 목록 404(없는 작품과 같은 본문, ADMIN 포함)·관리자 상세 조회, 내 별점·리뷰 본인 조회·삭제 유지와 작성·수정 404, 다시 공개 시 별점·리뷰·연결·ID 보존, 기존·관리자 등록 작품 PUBLIC 기본값, GENERAL 확인 작품만 공개 전환, 변경 기록 실패 시 롤백, 동시 변경 1건만 반영 | O |
 | `StagingReviewIntegrationTest` | staging 검수(가상 데이터·격리 DB): 익명 401·USER 403·CSRF 누락 403·사유 필수, 새 작품 등록(작품·연결·작가·근거·검수 기록 한 번에, 공개 상세 표시)과 반복 승인 409, ADULT·UNKNOWN 새 작품 등록 거절·기존 작품 연결 허용, 상세 미확인 항목 연결 거절·보류·제외, 후보 판단 필수·작품 version 충돌·후보 재생성 시 행 유지, 제목만 같은 작품 자동 병합 없음·동명이인 확인, 연결 키·별칭 충돌 409, 두 플랫폼 같은 작품을 하나의 작품으로, 검수 중 재수집 409·후보 변경 409, 동시 승인 1건만 성공, 기록 실패 시 전체 롤백, 자동 STALE 후보 재등장 시 재판단·사람 거절은 유지 (#51, #66) | O |
 | `StagingReviewDemoTest` | 포트폴리오 시연: 모의 수집기 → 검수 → 연결·등록·보류·재수집 충돌. 실행 기록을 `build/reports/demo/staging-review-demo.md` 에 남김 (#51) | O |
 | `ProvenanceConcurrencyTest`, `ProvenanceMigrationTest` | 같은 외부 ID 동시 연결은 하나만 성공, 같은 version 하위 리소스 동시 변경, 기록 실패·version 증가 실패 시 등록·변경 전체 롤백 / V8 FK(CASCADE 없음)·부분 유니크·CHECK·복합 FK·변경 기록 추가 전용 (#40) | O |
@@ -408,6 +409,7 @@ npm run build
 | GET | `/api/v1/admin/crawl-runs[/{runId}]` | 수집 실행 목록·상세(작업 상태별 수) (ADMIN, #45) |
 | POST | `/api/v1/admin/crawl-runs/{runId}/stop` | 수집 실행 중단 요청 `{"reason"}` (ADMIN, #45) |
 | GET | `/api/v1/admin/staging-listings[/{id}]` | 수집 대기(staging) 목록·상세. 비공개, 작품으로 자동 등록하지 않음(검수 결정으로만, #51) (ADMIN, #45) |
+| POST | `/api/v1/admin/works/{workId}/visibility` | 작품 공개 상태 `PUBLIC`·`HIDDEN` 변경 `{version, visibility, reason}`. 숨김 작품은 공개 목록·상세·공개 리뷰 목록에서 빠짐(없는 작품과 같은 404). 공개 전환은 연결 등급이 모두 GENERAL 일 때만(D-15) (ADMIN, #41 최소) |
 | GET | `/api/v1/admin/staging-listings/{id}/review` | 검수 화면 정보: 수집 revision·후보·지난 결정 (ADMIN, #51) |
 | POST | `/api/v1/admin/staging-listings/{id}/candidates` | 중복 후보 다시 만들기(행이 늘지 않음) (ADMIN, #51) |
 | POST | `/api/v1/admin/staging-listings/{id}/review` | 검수 결정 `LINK_EXISTING`·`CREATE_WORK`·`HOLD`·`REJECT`(`stagingRevision`·`reason` 필수, 열린 후보 전부 판단) (ADMIN, #51) |

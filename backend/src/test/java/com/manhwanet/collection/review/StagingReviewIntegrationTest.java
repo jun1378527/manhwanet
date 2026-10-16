@@ -137,7 +137,7 @@ class StagingReviewIntegrationTest {
     // ---------- 새 작품 등록 ----------
 
     @Test
-    void createWorkRegistersPublicWorkListingCreatorsAndLogsInOneStep() throws Exception {
+    void createWorkRegistersHiddenWorkListingCreatorsAndLogsInOneStep() throws Exception {
         long id = stage("TOOMICS", "demo-0001", "[DEMO] 가상의 별빛 정원", "전체 이용가");
         MvcResult view = admin.get("/api/v1/admin/staging-listings/" + id + "/review");
         assertThat(((Number) JsonPath.read(body(view), "$.data.revision")).longValue()).isEqualTo(1);
@@ -169,8 +169,21 @@ class StagingReviewIntegrationTest {
                 .isZero();
         assertThat(jdbc.queryForObject("SELECT decision || ':' || staging_revision FROM staging_review_decisions", String.class))
                 .isEqualTo("CREATE_WORK:1");
-        // 공개 상세에 보인다(공개 등록)
-        assertThat(status(new AuthTestClient(mockMvc, objectMapper).get("/api/v1/works/" + workId))).isEqualTo(200);
+        // 처음부터 HIDDEN 으로 저장되어 공개 경로에 보이지 않는다(#41)
+        assertThat(jdbc.queryForObject("SELECT visibility FROM works", String.class)).isEqualTo("HIDDEN");
+        assertThat(jdbc.queryForObject("SELECT after_json->>'visibility' FROM admin_change_log WHERE entity_type = 'WORK' "
+                + "AND action = 'CREATE'", String.class)).isEqualTo("HIDDEN");
+        // 잠깐 PUBLIC 이었다가 숨긴 것이 아니다(상태 변경 기록 없음)
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_change_log WHERE entity_type = 'WORK' AND action = 'STATUS_CHANGE'",
+                Integer.class)).isZero();
+        AuthTestClient visitor = new AuthTestClient(mockMvc, objectMapper);
+        assertThat(code(visitor.get("/api/v1/works/" + workId))).isEqualTo("WORK_NOT_FOUND");
+        assertThat((List<?>) JsonPath.read(body(visitor.get("/api/v1/works")), "$.data.content")).isEmpty();
+        // 관리자가 검수 뒤 명시적으로 공개
+        MvcResult published = admin.postJson("/api/v1/admin/works/" + workId + "/visibility",
+                Map.of("version", 0, "visibility", "PUBLIC", "reason", "[DEMO] 검수 완료 공개"));
+        assertThat(status(published)).as(body(published)).isEqualTo(200);
+        assertThat(status(visitor.get("/api/v1/works/" + workId))).isEqualTo(200);
 
         // 같은 요청을 다시 보내도 작품·연결이 늘지 않는다
         MvcResult again = admin.postJson("/api/v1/admin/staging-listings/" + id + "/review", request);
@@ -181,23 +194,29 @@ class StagingReviewIntegrationTest {
     }
 
     @Test
-    void adultOrUnknownItemsAreNotRegisteredAsNewPublicWorks() throws Exception {
+    void adultOrUnknownItemsAreRegisteredHiddenAndCannotBePublished() throws Exception {
         long adult = stage("TOOMICS", "demo-0019", "[DEMO] 가상의 밤 이야기", "19세 이용가");
         long unknown = stage("TOOMICS", "demo-0020", "[DEMO] 가상의 표기 없음", null);
-        for (long id : List.of(adult, unknown)) {
-            MvcResult r = admin.postJson("/api/v1/admin/staging-listings/" + id + "/review",
-                    createWork(1, "등록 시도", List.of(newCreator("[DEMO] 가상작가 밤", "STORY")), List.of()));
-            assertThat(code(r)).isEqualTo("STAGING_NOT_REVIEWABLE");
-        }
-        assertThat(count("works")).isZero();
-        assertThat(count("creators")).isZero();
+        MvcResult hidden = admin.postJson("/api/v1/admin/staging-listings/" + unknown + "/review",
+                createWork(1, "숨김 등록", List.of(newCreator("[DEMO] 가상작가 밤", "STORY")), List.of()));
+        assertThat(status(hidden)).as(body(hidden)).isEqualTo(200);
+        long hiddenWork = jdbc.queryForObject("SELECT id FROM works", Long.class);
+        assertThat(jdbc.queryForObject("SELECT visibility FROM works", String.class)).isEqualTo("HIDDEN");
+        assertThat(jdbc.queryForObject("SELECT age_class FROM work_platform_listings", String.class)).isEqualTo("UNKNOWN");
+        // 등급 미확인 작품은 공개로 바꾸지 않는다(D-15 미결정)
+        MvcResult blocked = admin.postJson("/api/v1/admin/works/" + hiddenWork + "/visibility",
+                Map.of("version", 0, "visibility", "PUBLIC", "reason", "공개 시도"));
+        assertThat(code(blocked)).isEqualTo("WORK_PUBLICATION_BLOCKED");
+        assertThat(jdbc.queryForObject("SELECT visibility || ':' || version FROM works", String.class)).isEqualTo("HIDDEN:0");
+        assertThat(code(new AuthTestClient(mockMvc, objectMapper).get("/api/v1/works/" + hiddenWork))).isEqualTo("WORK_NOT_FOUND");
         // 기존 작품 연결은 할 수 있다(연결은 공개 응답에 나가지 않음)
         long workId = existingWork("[DEMO] 가상의 밤 이야기", "[DEMO] 가상작가 밤");
         List<Map<String, Object>> judged = judgeAll(adult, workId);
         MvcResult linked = admin.postJson("/api/v1/admin/staging-listings/" + adult + "/review",
                 link(1, workId, 0, "성인 판본 연결", judged));
         assertThat(status(linked)).as(body(linked)).isEqualTo(200);
-        assertThat(jdbc.queryForObject("SELECT age_class FROM work_platform_listings", String.class)).isEqualTo("ADULT");
+        assertThat(jdbc.queryForObject("SELECT age_class FROM work_platform_listings WHERE platform_work_id = 'demo-0019'",
+                String.class)).isEqualTo("ADULT");
     }
 
     @Test

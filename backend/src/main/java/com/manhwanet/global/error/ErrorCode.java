@@ -29,6 +29,8 @@ public enum ErrorCode {
     WORK_NOT_FOUND(HttpStatus.NOT_FOUND, "작품을 찾을 수 없습니다."),
     /** 관리자 수정 요청의 version 이 현재 작품 version 과 다름. 아무것도 바꾸지 않는다 */
     WORK_VERSION_CONFLICT(HttpStatus.CONFLICT, "작품이 다른 곳에서 수정되었습니다. 최신 내용을 다시 불러온 뒤 수정해 주세요."),
+    /** #41: ADULT·UNKNOWN 공개 표시 정책(D-15) 미결정이라 등급이 GENERAL 로 확인되지 않은 작품은 공개로 바꾸지 않음 */
+    WORK_PUBLICATION_BLOCKED(HttpStatus.CONFLICT, "등급이 전체·청소년 이용가(GENERAL)로 확인된 작품만 공개로 바꿀 수 있습니다."),
 
     // platform (#39)
     PLATFORM_NOT_FOUND(HttpStatus.NOT_FOUND, "플랫폼을 찾을 수 없습니다."),

@@ -9,6 +9,8 @@
 > 적용된 마이그레이션 V1~V6은 고치지 않습니다. **#39의 마이그레이션은 V7(플랫폼·허용 호스트·상태 이력·작품 연결)입니다.** **#40의 마이그레이션은 V8(외부 ID·공식 링크·필드 근거·관리 변경 기록)입니다.**
 > **#40 구현 (2026-10-14):** §3.3·§5.4·§5.6과 수정 사유·변경 기록을 구현했습니다. 기존 등록·수정·연결·플랫폼 API 에 `reason`·`evidence[]`를 넣었고, 계약과 설계와 다른 점은 §3.3 "구현 기록 (#40)"에 있습니다. 숨김·중복 검수(#41), 공개 표시(#42), 수집기는 포함하지 않았습니다.
 
+> **#41 최소 구현 (2026-10-16, 미커밋):** 작품 공개 상태(`visibility` PUBLIC·HIDDEN, V16)와 관리자 상태 변경 API, 숨김 작품의 공개 경로 제외만 구현했습니다(#51 의 새 작품 HIDDEN 등록 선행). 중복 후보 조회(`duplicate-candidates`)·중복 표시(`duplicate_of_work_id`)·연결 이전 흐름·판단 규칙 문서화는 #41 남은 범위입니다. 계약은 §3.1 "구현 기록 (#41 최소)".
+
 - 관련 문서: [work-creator-spec.md](work-creator-spec.md)(작품·작가 등록·조회), [review-design-draft.md](review-design-draft.md)(버전 충돌 방식), [rating-design-draft.md](rating-design-draft.md), [auth-design-draft.md](auth-design-draft.md)(ADMIN·CSRF), [architecture.md](architecture.md)
 - 표기: **[결정]** 이 명세의 정한 값, **[선택]** 사용자가 고를 수 있는 구현 선택(§11), **[후속]** 이번 범위 밖
 
@@ -59,6 +61,19 @@ ALTER TABLE creators
 - 기존 행은 `version 0`, `PUBLIC`이 됩니다. 기존 데이터·ID·별점·리뷰는 그대로입니다.
 - `HIDDEN` 작품은 공개 목록·상세에서 보이지 않습니다(§7). 별점·리뷰 행은 남습니다.
 - `duplicate_of_work_id`는 "이 작품은 저 작품의 중복"이라는 검수 결과입니다. 별점·리뷰를 옮기지 않습니다(병합은 [후속]).
+
+**구현 기록 (#41 최소, 2026-10-16)**
+
+| 항목 | 구현 |
+|---|---|
+| 마이그레이션 | `V16__add_work_visibility.sql`: `works.visibility VARCHAR(20) NOT NULL DEFAULT 'PUBLIC'` + `ck_works_visibility`. 기존 행은 모두 `PUBLIC`(지금 공개 동작 보존). `duplicate_of_work_id` 와 그 CHECK·FK 는 넣지 않았습니다(#41 남은 범위). 일반 열 색인은 두지 않았습니다(§5.1 주의) |
+| 등록 | 관리자 등록 API(`POST /admin/works`)는 지금처럼 `PUBLIC`. 수집 대기 항목에서 만든 작품(#51 `CREATE_WORK`)은 같은 트랜잭션에서 **처음부터 `HIDDEN` 으로 INSERT** 합니다(잠깐 공개했다가 숨기지 않음). 변경 기록 `WORK·CREATE` 의 이후 값에 `visibility` 가 들어갑니다 |
+| 상태 변경 | `POST /api/v1/admin/works/{workId}/visibility` `{version, visibility: PUBLIC\|HIDDEN, reason}`(ADMIN + CSRF). 작품 행 잠금 → version 비교(다르면 409 `WORK_VERSION_CONFLICT`, `currentVersion`) → 같은 상태면 그대로 200(version·기록 없음) → 조건부 `UPDATE ... version + 1` → 변경 기록 `WORK·STATUS_CHANGE`(이전·이후 `visibility`, 사유 필수). 응답은 관리자 상세(`visibility` 포함) |
+| 공개 전환 정책 | ADULT·UNKNOWN 공개 표시는 미결정(D-15)이라, **ACTIVE 연결이 하나 이상 있고 모두 `GENERAL`** 일 때만 `PUBLIC` 으로 바꿉니다. 아니면 409 `WORK_PUBLICATION_BLOCKED`. 연결이 없는 작품도 등급을 확인할 수 없어 공개로 되돌리지 못합니다(기존 공개 작품은 그대로 공개). `HIDDEN` 전환은 언제나 가능 |
+| 공개 경로 | 숨김 작품은 없는 작품과 같게: 공개 상세 404 `WORK_NOT_FOUND`(응답 본문도 같음), 공개 목록·`totalElements` 에서 제외, 공개 리뷰 목록 404. ADMIN 도 공개 경로에서는 같은 규칙이며 관리자 상세(`GET /admin/works/{id}`)로 봅니다. 작가 API 는 작품 목록을 내보내지 않아 영향 없음 |
+| 내 별점·리뷰 | #41 결정("작성자 본인의 기록 조회·삭제는 유지")대로: 내 기록이 있으면 조회·삭제 가능, 없으면 없는 작품과 같은 404. 새 별점·리뷰 작성과 수정은 404. 쓰기 전 확인은 `SELECT visibility ... FOR SHARE` 라 숨김 전환과 직렬화됩니다 |
+| 보존 | 숨김·공개 전환은 작품 ID·별점·리뷰·플랫폼 연결·근거를 바꾸지 않습니다. 다시 공개하면 별점 집계·리뷰가 그대로 보입니다 |
+
 
 ### 3.2 V7: 플랫폼, 상태 이력, 작품 연결
 

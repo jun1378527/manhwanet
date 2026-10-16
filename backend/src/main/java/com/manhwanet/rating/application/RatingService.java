@@ -12,6 +12,7 @@ import com.manhwanet.rating.dto.MyRatingResponse;
 import com.manhwanet.rating.dto.RatingRequest;
 import com.manhwanet.work.application.WorkService;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -39,11 +40,19 @@ public class RatingService {
         this.workService = workService;
     }
 
+    /**
+     * 내 별점. 숨김 작품(#41)은 내 기록이 있을 때만 돌려주고(작성자 본인 조회 유지), 없으면 없는 작품과 같은 404 다.
+     */
     public MyRatingResponse getMyRating(Long userId, Long workId) {
-        requireWork(workId);
-        return workRatingRepository.findByUserIdAndWorkId(userId, workId)
-                .map(RatingService::toResponse)
-                .orElseGet(() -> MyRatingResponse.unrated(workId));
+        WorkService.Access access = workService.access(workId);
+        if (access == WorkService.Access.MISSING) {
+            throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
+        }
+        Optional<WorkRating> mine = workRatingRepository.findByUserIdAndWorkId(userId, workId);
+        if (access == WorkService.Access.HIDDEN && mine.isEmpty()) {
+            throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
+        }
+        return mine.map(RatingService::toResponse).orElseGet(() -> MyRatingResponse.unrated(workId));
     }
 
     /**
@@ -54,7 +63,8 @@ public class RatingService {
     @Transactional
     public MyRatingResponse putMyRating(Long userId, Long workId, RatingRequest request) {
         short scoreHalf = validateScore(request);
-        requireWork(workId);
+        // 숨김 작품에는 새로 쓰거나 고치지 않는다(없는 작품과 같은 404). 숨김 전환과 직렬화
+        workService.requirePublicForWrite(workId);
         try {
             workRatingRepository.upsert(userId, workId, scoreHalf);
         } catch (DataIntegrityViolationException e) {
@@ -68,15 +78,18 @@ public class RatingService {
         return toResponse(saved);
     }
 
-    /** 삭제. 별점이 없어도 성공한다(멱등). */
+    /**
+     * 삭제. 공개 작품은 별점이 없어도 성공한다(멱등). 숨김 작품(#41)은 내 별점이 있으면 지울 수 있고(작성자 본인 삭제 유지),
+     * 없으면 없는 작품과 같은 404 다.
+     */
     @Transactional
     public void deleteMyRating(Long userId, Long workId) {
-        requireWork(workId);
-        workRatingRepository.deleteByUserIdAndWorkId(userId, workId);
-    }
-
-    private void requireWork(Long workId) {
-        if (!workService.exists(workId)) {
+        WorkService.Access access = workService.access(workId);
+        if (access == WorkService.Access.MISSING) {
+            throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
+        }
+        int deleted = workRatingRepository.deleteByUserIdAndWorkId(userId, workId);
+        if (access == WorkService.Access.HIDDEN && deleted == 0) {
             throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
         }
     }

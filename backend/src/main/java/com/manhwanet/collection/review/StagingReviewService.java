@@ -19,8 +19,6 @@ import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.error.ListingAlreadyLinkedException;
 import com.manhwanet.global.error.VersionConflictException;
 import com.manhwanet.platform.application.WorkListingService;
-import com.manhwanet.platform.domain.AgeClass;
-import com.manhwanet.platform.domain.AgeRatingClassifier;
 import com.manhwanet.platform.domain.ListingRepository;
 import com.manhwanet.platform.domain.ListingRow;
 import com.manhwanet.platform.dto.CreateListingRequest;
@@ -28,6 +26,7 @@ import com.manhwanet.platform.dto.ListingInput;
 import com.manhwanet.platform.dto.ListingMutationResponse;
 import com.manhwanet.review.dto.JsonInteger;
 import com.manhwanet.work.application.WorkService;
+import com.manhwanet.work.domain.WorkVisibility;
 import com.manhwanet.work.dto.AdminWorkDetailResponse;
 import com.manhwanet.work.dto.CreateWorkRequest;
 import java.time.Instant;
@@ -55,8 +54,8 @@ import org.springframework.transaction.annotation.Transactional;
  *       결정 유니크 인덱스(uk_srd_final)로 동시 승인도 하나만 성공한다</li>
  *   <li>제목만으로 병합하지 않는다. 승인 때 후보를 다시 만들고, 열린 후보 전부에 대한 검수자 판단이 없으면 409</li>
  *   <li>근거는 검수자가 보낸 것만 쓴다(수집기 근거 COLLECTOR 는 D-19 미결정이라 만들지 않음). 줄거리·표지는 옮기지 않는다</li>
- *   <li>새 작품 등록은 원래 등급 표기로 18세 미만이 확인된 항목(GENERAL)만. 공개 상태(HIDDEN) 모델이 아직 없어(#41)
- *       새 작품은 바로 공개 목록에 보이므로, ADULT·UNKNOWN 은 공개 표시 정책(D-15) 전까지 새 작품으로 만들지 않는다</li>
+ *   <li>새 작품은 같은 트랜잭션에서 처음부터 HIDDEN 으로 저장한다(#41). 공개 경로에 드러나지 않으므로 등급(GENERAL·ADULT·UNKNOWN)과
+ *       관계없이 등록할 수 있고, 공개는 관리자가 POST /admin/works/{id}/visibility 로 명시적으로 바꾼다(ADULT·UNKNOWN 은 D-15 전까지 공개 불가)</li>
  * </ul>
  */
 @Service
@@ -174,13 +173,6 @@ public class StagingReviewService {
             throw new BusinessException(ErrorCode.STAGING_NOT_REVIEWABLE,
                     "상세를 확인하지 못한 항목(" + staging.detailStatus() + ")은 연결·등록할 수 없습니다. 재수집 뒤 검수하거나 보류·제외하세요.");
         }
-        Optional<AgeClass> rawClass = AgeRatingClassifier.classify(staging.ageRatingRaw());
-        if (decision == Decision.CREATE_WORK
-                && !(rawClass.isPresent() && rawClass.get() == AgeClass.GENERAL && "GENERAL".equals(staging.ageClass()))) {
-            throw new BusinessException(ErrorCode.STAGING_NOT_REVIEWABLE, "새 작품 등록은 원래 등급 표기로 18세 미만이 확인된 항목만 "
-                    + "할 수 있습니다(현재 " + staging.ageClass() + "). 공개 상태(HIDDEN, #41)와 공개 표시 정책(D-15) 전에는 "
-                    + "ADULT·UNKNOWN 을 새 작품으로 만들지 않습니다. 기존 작품 연결·보류는 할 수 있습니다.");
-        }
 
         // 승인 시점의 후보를 다시 만들고, 열린 후보 전부에 대한 판단을 요구한다(제목만으로 병합하지 않음)
         List<StagingCreditRow> credits = stagingRepository.findCredits(stagingId);
@@ -241,7 +233,7 @@ public class StagingReviewService {
             }
         } else {
             CreateWorkRequest create = newWorkRequest(staging, request.work(), options, reason, actorId);
-            AdminWorkDetailResponse detail = workService.register(create, actorId);
+            AdminWorkDetailResponse detail = workService.register(create, actorId, WorkVisibility.HIDDEN);
             resultWorkId = detail.id();
             resultWorkVersion = repository.workVersion(resultWorkId).orElseThrow();
             listingId = listingRepository.findByPlatformWorkId(staging.platformCode(), staging.platformWorkId())

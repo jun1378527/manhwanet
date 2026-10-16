@@ -134,7 +134,7 @@ class StagingReviewDemoTest {
 
     @Test
     void collectReviewLinkCreateHoldAndDetectRecollection() throws Exception {
-        say("# staging 검수·공개 등록 시연 (#51)\n");
+        say("# staging 검수·숨김 등록·공개 시연 (#51·#41)\n");
         say("> **[DEMO] 모든 작품·작가·주소는 가상 데이터입니다. 실제 작품 정보가 아닙니다.** 요청은 127.0.0.1 모의 서버로만 갔고,"
                 + " 격리 테스트 DB 에서 실행했습니다. 실행 시각 " + Instant.now() + "\n");
 
@@ -171,21 +171,59 @@ class StagingReviewDemoTest {
                 List.of(newCreator("[DEMO] 가상작가 구름", "STORY")), List.of()));
         assertThat(status(created)).as(body(created)).isEqualTo(200);
         long newWork = jdbc.queryForObject("SELECT work_id FROM work_platform_listings WHERE platform_work_id = 'demo-1002'", Long.class);
-        say("4. `demo-1002` 후보 없음 → CREATE_WORK → 새 공개 작품 #" + newWork + " (작가 새로 등록, 근거는 검수자가 STAFF 로 기록)");
+        say("4. `demo-1002` 후보 없음 → CREATE_WORK → 새 작품 #" + newWork + " 를 처음부터 **HIDDEN** 으로 등록 (작가 새로 등록, 근거는 검수자가 STAFF 로 기록)");
         MvcResult again = admin.postJson(review(s1002), createWork(rev(view2), "[DEMO] 다시 승인",
                 List.of(newCreator("[DEMO] 가상작가 구름", "STORY")), List.of()));
         say("   - 같은 승인을 다시 보냄 → " + status(again) + " " + code(again) + " (작품 수 그대로 " + count("works") + "개)");
+        AuthTestClient visitor = new AuthTestClient(mockMvc, objectMapper);
+        AuthTestClient reader = new AuthTestClient(mockMvc, objectMapper);
+        reader.signup("demo-reader@manhwanet.test", STRONG_PASSWORD, "시연독자");
+        reader.withHeader("X-Expected-User-Id", String.valueOf(
+                jdbc.queryForObject("SELECT id FROM users WHERE email = 'demo-reader@manhwanet.test'", Long.class)));
+        assertThat(code(visitor.get("/api/v1/works/" + newWork))).isEqualTo("WORK_NOT_FOUND");
+        MvcResult earlyRating = reader.putRaw("/api/v1/me/ratings/" + newWork, "{\"score\": 4.5}");
+        assertThat(code(earlyRating)).isEqualTo("WORK_NOT_FOUND");
+        say("   - 숨김 상태: 공개 상세 " + status(visitor.get("/api/v1/works/" + newWork)) + ", 공개 목록 "
+                + publicTitles(visitor) + ", 독자 별점 등록 " + status(earlyRating) + " " + code(earlyRating) + " (없는 작품과 같음)");
+        long hiddenVersion = jdbc.queryForObject("SELECT version FROM works WHERE id = ?", Long.class, newWork);
+        MvcResult published = admin.postJson("/api/v1/admin/works/" + newWork + "/visibility",
+                Map.of("version", hiddenVersion, "visibility", "PUBLIC", "reason", "[DEMO] 검수 완료, 15세 이용가 확인 뒤 공개"));
+        assertThat(status(published)).as(body(published)).isEqualTo(200);
+        say("   - 관리자가 명시적으로 PUBLIC 전환 → " + JsonPath.read(body(published), "$.data.visibility") + " (version "
+                + JsonPath.read(body(published), "$.data.version") + ", 변경 기록·사유 남김)");
+        assertThat(status(reader.putRaw("/api/v1/me/ratings/" + newWork, "{\"score\": 4.5}"))).isEqualTo(200);
+        MvcResult written = reader.postJson("/api/v1/me/reviews/" + newWork,
+                Map.of("body", "[DEMO] 가상 작품에 남긴 시연용 리뷰입니다.", "containsSpoiler", false));
+        assertThat(status(written)).as(body(written)).isIn(200, 201);
+        say("   - 공개 뒤: 공개 상세 " + status(visitor.get("/api/v1/works/" + newWork)) + ", 독자 별점 4.5·리뷰 작성 → 공개 리뷰 "
+                + JsonPath.read(body(visitor.get("/api/v1/works/" + newWork + "/reviews")), "$.data.totalElements") + "건, 별점 집계 "
+                + JsonPath.read(body(visitor.get("/api/v1/works/" + newWork)), "$.data.rating"));
+        long publicVersion = jdbc.queryForObject("SELECT version FROM works WHERE id = ?", Long.class, newWork);
+        admin.postJson("/api/v1/admin/works/" + newWork + "/visibility",
+                Map.of("version", publicVersion, "visibility", "HIDDEN", "reason", "[DEMO] 숨김 동작 확인"));
+        say("   - 다시 HIDDEN: 공개 상세 " + status(visitor.get("/api/v1/works/" + newWork)) + ", 공개 리뷰 목록 "
+                + status(visitor.get("/api/v1/works/" + newWork + "/reviews")) + ", 독자 본인 별점 조회 "
+                + status(reader.get("/api/v1/me/ratings/" + newWork)) + "(본인 기록 유지), 별점·리뷰 행 "
+                + jdbc.queryForObject("SELECT COUNT(*) FROM work_ratings WHERE work_id = ?", Integer.class, newWork) + "·"
+                + jdbc.queryForObject("SELECT COUNT(*) FROM work_reviews WHERE work_id = ?", Integer.class, newWork) + " 보존");
+        long hiddenAgain = jdbc.queryForObject("SELECT version FROM works WHERE id = ?", Long.class, newWork);
+        admin.postJson("/api/v1/admin/works/" + newWork + "/visibility",
+                Map.of("version", hiddenAgain, "visibility", "PUBLIC", "reason", "[DEMO] 다시 공개"));
+        assertThat((Object) JsonPath.read(body(visitor.get("/api/v1/works/" + newWork)), "$.data.rating.count")).isEqualTo(1);
+        say("   - 다시 PUBLIC: 같은 작품 ID #" + newWork + ", 별점·리뷰 그대로");
 
-        // 5. 성인 등급은 새 공개 작품으로 만들지 않고 보류
+        // 5. 성인 등급: 숨김으로 등록은 되지만 공개는 막힘(D-15 미결정)
         long s1003 = staging("demo-1003");
         Map<String, Object> view3 = postCandidates(s1003);
-        MvcResult blocked = admin.postJson(review(s1003), createWork(rev(view3), "[DEMO] 등록 시도",
+        MvcResult adultCreated = admin.postJson(review(s1003), createWork(rev(view3), "[DEMO] 성인 등급 숨김 등록",
                 List.of(newCreator("[DEMO] 가상작가 밤", "STORY")), List.of()));
-        say("5. `demo-1003`(19세 이용가) CREATE_WORK → " + status(blocked) + " " + code(blocked)
-                + " (공개 상태·연령 표시 정책 전에는 새 공개 작품으로 만들지 않음)");
-        MvcResult held = admin.postJson(review(s1003), Map.of("decision", "HOLD", "stagingRevision", rev(view3), "reason",
-                "[DEMO] 공개 표시 정책(D-15) 결정 대기"));
-        say("   - HOLD → " + JsonPath.read(body(held), "$.data.reviewStatus"));
+        assertThat(status(adultCreated)).as(body(adultCreated)).isEqualTo(200);
+        long adultWork = jdbc.queryForObject("SELECT work_id FROM work_platform_listings WHERE platform_work_id = 'demo-1003'", Long.class);
+        MvcResult blocked = admin.postJson("/api/v1/admin/works/" + adultWork + "/visibility",
+                Map.of("version", 0, "visibility", "PUBLIC", "reason", "[DEMO] 공개 시도"));
+        assertThat(code(blocked)).isEqualTo("WORK_PUBLICATION_BLOCKED");
+        say("5. `demo-1003`(19세 이용가) CREATE_WORK → 숨김 작품 #" + adultWork + " 등록, PUBLIC 전환 → " + status(blocked) + " "
+                + code(blocked) + " (ADULT·UNKNOWN 공개 표시 정책 D-15 미결정)");
 
         // 6. 검수 중 재수집
         site.ok("/demo-sitemap.xml", "detail " + B + "/demo/demo-1004\n");
@@ -209,13 +247,14 @@ class StagingReviewDemoTest {
 
         // 결과
         say("\n## 결과\n");
-        say("| 작품 | 제목 | 연결 |");
-        say("|---|---|---|");
+        say("| 작품 | 제목 | 공개 상태 | 연결 |");
+        say("|---|---|---|---|");
         for (Map<String, Object> row : jdbc.queryForList("""
-                SELECT w.id, t.title, string_agg(l.platform_code || ':' || l.platform_work_id, ', ' ORDER BY l.id) AS listings
+                SELECT w.id, t.title, w.visibility, string_agg(l.platform_code || ':' || l.platform_work_id, ', ' ORDER BY l.id) AS listings
                 FROM works w JOIN work_titles t ON t.work_id = w.id AND t.is_primary
-                LEFT JOIN work_platform_listings l ON l.work_id = w.id GROUP BY w.id, t.title ORDER BY w.id""")) {
-            say("| #" + row.get("id") + " | " + row.get("title") + " | " + (row.get("listings") == null ? "-" : row.get("listings")) + " |");
+                LEFT JOIN work_platform_listings l ON l.work_id = w.id GROUP BY w.id, t.title, w.visibility ORDER BY w.id""")) {
+            say("| #" + row.get("id") + " | " + row.get("title") + " | " + row.get("visibility") + " | "
+                    + (row.get("listings") == null ? "-" : row.get("listings")) + " |");
         }
         say("\n| staging | 검수 상태 | revision |");
         say("|---|---|---|");
@@ -226,7 +265,9 @@ class StagingReviewDemoTest {
         say("\n검수 변경 기록 " + jdbc.queryForObject("SELECT COUNT(*) FROM admin_change_log WHERE entity_type = 'STAGING_LISTING'",
                 Integer.class) + "건, 검수 결정 " + count("staging_review_decisions") + "건. 표지 다운로드·실제 플랫폼 요청 없음.");
 
-        assertThat(count("works")).isEqualTo(3);
+        assertThat(count("works")).isEqualTo(4);
+        assertThat(jdbc.queryForList("SELECT visibility FROM works ORDER BY id", String.class))
+                .containsExactly("PUBLIC", "PUBLIC", "HIDDEN", "HIDDEN");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM work_platform_listings WHERE work_id = ?", Integer.class, existingWork))
                 .isEqualTo(1);
         assertThat(jdbc.queryForList("SELECT DISTINCT split_part(url, '/', 3) FROM work_platform_listings", String.class))
@@ -249,6 +290,11 @@ class StagingReviewDemoTest {
         return workService.register(new CreateWorkRequest("WEBTOON", "KR", null, List.of(new CreateWorkRequest.TitleRequest(title, "ko", true)),
                 List.of(new CreateWorkRequest.CreditRequest(creatorId, "STORY")), null, null, null, evidence, "[DEMO] 시연 준비"),
                 adminId).id();
+    }
+
+    private String publicTitles(AuthTestClient client) throws Exception {
+        List<String> titles = JsonPath.read(body(client.get("/api/v1/works")), "$.data.content[*].primaryTitle.title");
+        return titles.toString();
     }
 
     private long staging(String platformWorkId) {
