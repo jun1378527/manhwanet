@@ -1,0 +1,15 @@
+# 데모 데이터 명령 전용 프로필(#67). 웹 서버를 띄우지 않고 DemoSeedCommand 만 실행한 뒤 끝난다.
+# 반드시 local,demo 와 함께 쓴다(데모 DB 가드는 demo 프로필에 있음): --spring.profiles.active=local,demo,demo-seed
+# 이 파일은 데모 소스 세트(src/demo)에만 있어 bootJar 에 들어가지 않는다.
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off
+manhwanet:
+  collector:
+    # 가상의 연락처(모의 서버에만 보냄)
+    contact-url: https://manhwanet.test/demo
+logging:
+  level:
+    root: WARN
+    com.manhwanet.demo: INFO

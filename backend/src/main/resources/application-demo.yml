@@ -1,0 +1,7 @@
+# 포트폴리오 데모 프로필(#67). 개발 DB 와 분리된 데모 전용 DB(DEMO_DB_NAME, 기본 manhwanet_demo)에 붙는다.
+# local 프로필 뒤에 둔다: --spring.profiles.active=local,demo
+# 연결된 DB 이름이 _demo 로 끝나지 않거나 DB_NAME·TEST_DB_NAME 과 같으면 마이그레이션 전에 기동을 멈춘다(DemoDatabaseGuard).
+# 보안 설정(세션 쿠키·CSRF·로그인 보호)은 local 과 같다. 데모라고 약화하지 않는다.
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DEMO_DB_NAME:manhwanet_demo}

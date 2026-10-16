@@ -10,6 +10,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required. Copy .env.example to .env}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required. Copy .env.example to .env}
       TEST_DB_NAME: ${TEST_DB_NAME:-manhwanet_test}
+      DEMO_DB_NAME: ${DEMO_DB_NAME:-manhwanet_demo}
       TZ: UTC
     ports:
       - "${DB_PORT:-5432}:5432"

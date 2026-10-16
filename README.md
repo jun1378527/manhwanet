@@ -54,7 +54,8 @@ manhwanet/
 │   ├── src/lib/auth/                # 로그인 상태 조회, 브라우저 인증 API(CSRF), returnTo, 입력 검사
 │   ├── src/lib/works/               # URL 파라미터 해석, 표시용 라벨
 │   └── .env.example
-├── docker/postgres/init/            # PostgreSQL 최초 기동 시 실행 스크립트 (테스트 DB 생성)
+├── docker/postgres/init/            # PostgreSQL 최초 기동 시 실행 스크립트 (테스트 DB·데모 DB 생성)
+├── scripts/demo/                    # 포트폴리오 데모 DB 만들기·초기화 (PowerShell, #67)
 ├── docs/                            # 설계 문서
 ├── docker-compose.yml               # 로컬 PostgreSQL
 ├── .env.example                     # Backend/DB 환경변수 목록
@@ -200,6 +201,20 @@ cd backend
 
 - 흐름: 모의 수집 → 후보 확인 → 기존 작품 연결(LINK_EXISTING) → 새 작품을 숨김(HIDDEN)으로 등록(CREATE_WORK) → 반복 승인 409 → 숨김 중 공개 경로 404 → 관리자 명시적 공개 → 독자 별점·리뷰 → 다시 숨김·공개(기록 보존) → 성인 등급 숨김 등록·공개 전환 409 → 검수 중 재수집 409 → 최신 내용으로 다시 승인
 
+#### 포트폴리오 데모 (#67)
+
+개발 DB와 분리된 **데모 DB**(`manhwanet_demo`)에 가상 작품(`[DEMO]`)을 기존 수집·검수·등록 서비스로 만들고, 기존 프론트에서 목록·상세·로그인·별점·리뷰를 시연합니다. 준비·기동·종료·초기화는 [docs/demo-guide.md](docs/demo-guide.md)를 따르세요.
+
+```powershell
+.\scripts\demo\create-demo-db.ps1                               # 데모 DB 만들기(있으면 그대로)
+cd backend
+.\gradlew.bat demo -Pstep=all                                    # 모의 수집 → 검수(HIDDEN 등록) → 명시적 공개
+.\gradlew.bat bootRun --args="--spring.profiles.active=local,demo" # 데모 DB로 서버 기동
+```
+
+- 계정 비밀번호는 저장소에 없습니다. `MANHWANET_DEMO_ADMIN_PASSWORD`·`MANHWANET_DEMO_READER_PASSWORD` 는 데모 명령과 백엔드 창에만 두거나, 처음 만들 때 생성된 값을 한 번만 출력합니다. 프론트는 이 변수가 없는 별도 셸에서 실행합니다([docs/demo-guide.md](docs/demo-guide.md) §4·§5).
+- 데모 코드(모의 서버·데모 명령)는 `backend/src/demo` 소스 세트라 bootJar에 들어가지 않습니다. 초기화(`scripts/demo/reset-demo-db.ps1`)는 데모 DB만, 이름을 직접 확인해야 진행합니다.
+
 ### 3. Frontend 실행
 
 ```bash
@@ -281,6 +296,8 @@ cd backend
 | `WorkVisibilityIntegrationTest` | 작품 공개·숨김(#41 최소): 익명 401·USER 403·CSRF 누락 403·사유 필수·version 409, 숨김 작품의 공개 상세·목록·리뷰 목록 404(없는 작품과 같은 본문, ADMIN 포함)·관리자 상세 조회, 내 별점·리뷰 본인 조회·삭제 유지와 작성·수정 404, 다시 공개 시 별점·리뷰·연결·ID 보존, 기존·관리자 등록 작품 PUBLIC 기본값, GENERAL 확인 작품만 공개 전환, 변경 기록 실패 시 롤백, 동시 변경 1건만 반영 | O |
 | `StagingReviewIntegrationTest` | staging 검수(가상 데이터·격리 DB): 익명 401·USER 403·CSRF 누락 403·사유 필수, 새 작품 등록(작품·연결·작가·근거·검수 기록 한 번에, 공개 상세 표시)과 반복 승인 409, ADULT·UNKNOWN 새 작품 등록 거절·기존 작품 연결 허용, 상세 미확인 항목 연결 거절·보류·제외, 후보 판단 필수·작품 version 충돌·후보 재생성 시 행 유지, 제목만 같은 작품 자동 병합 없음·동명이인 확인, 연결 키·별칭 충돌 409, 두 플랫폼 같은 작품을 하나의 작품으로, 검수 중 재수집 409·후보 변경 409, 동시 승인 1건만 성공, 기록 실패 시 전체 롤백, 자동 STALE 후보 재등장 시 재판단·사람 거절은 유지 (#51, #66) | O |
 | `StagingReviewDemoTest` | 포트폴리오 시연: 모의 수집기 → 검수 → 연결·등록·보류·재수집 충돌. 실행 기록을 `build/reports/demo/staging-review-demo.md` 에 남김 (#51) | O |
+| `DemoScenarioIntegrationTest` | 포트폴리오 데모 단계(#67): 모의 수집 → HIDDEN 등록(공개 경로 404) → 명시적 공개 → 독자 로그인·별점·리뷰, 재실행 시 삭제·중복 없음, 데모 호스트 외 해석 거절, 데모가 아닌 DB 에서 명령 거절 | O |
+| `DemoDatabaseNamesTest` | 데모 DB 이름 규칙(`_demo` 접미사, 개발·테스트 DB 와 다름, 실제 연결 DB 확인) (#67) | X |
 | `ProvenanceConcurrencyTest`, `ProvenanceMigrationTest` | 같은 외부 ID 동시 연결은 하나만 성공, 같은 version 하위 리소스 동시 변경, 기록 실패·version 증가 실패 시 등록·변경 전체 롤백 / V8 FK(CASCADE 없음)·부분 유니크·CHECK·복합 FK·변경 기록 추가 전용 (#40) | O |
 | `PlatformListingMigrationTest`, `AgeRatingClassifierTest`, `PlatformUrlsTest` | V7 FK(CASCADE 없음)·유니크·CHECK·복합 FK, 초기 데이터와 테스트 시드 일치, 등급 분류, URL 정규화·패턴 검사 (#39) | O / X |
 | `AdminAccountServiceTest`, `AdminCliProfileTest` | 관리자 생성 분기, 비웹 `admin-cli` 프로필 | O |
@@ -337,6 +354,7 @@ npm run build
 | `DB_PORT` | PostgreSQL 포트 (Compose 호스트 포트) | `5432` | |
 | `DB_NAME` | 개발 DB 이름 | `manhwanet` | |
 | `TEST_DB_NAME` | 테스트 DB 이름 (test 프로필) | `manhwanet_test` | |
+| `DEMO_DB_NAME` | 포트폴리오 데모 DB 이름 (`demo` 프로필, `_demo` 로 끝나야 함, #67) | `manhwanet_demo` | |
 | `DB_USERNAME` | DB 사용자 | 없음 | ✅ |
 | `DB_PASSWORD` | DB 비밀번호 | 없음 | ✅ |
 | `SERVER_PORT` | Backend 포트 | `8080` | |

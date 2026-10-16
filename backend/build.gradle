@@ -34,6 +34,40 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// ---------- 포트폴리오 데모(#67) ----------
+// 데모 전용 코드(src/demo: 모의 플랫폼 서버·데모 어댑터·데모 데이터 명령)는 별도 소스 세트라 bootJar·bootRun 에 들어가지 않는다.
+sourceSets {
+    demo {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+    test {
+        compileClasspath += sourceSets.demo.output
+        runtimeClasspath += sourceSets.demo.output
+    }
+}
+
+configurations {
+    demoImplementation.extendsFrom implementation
+    demoRuntimeOnly.extendsFrom runtimeOnly
+}
+
+// 데모 데이터 명령. 데모 DB(DEMO_DB_NAME, 기본 manhwanet_demo)에만 붙고, 데이터를 지우지 않는다.
+// 예) gradlew demo -Pstep=all   (step: accounts·collect·review·publish·status·all, 기본 status)
+tasks.register('demo', JavaExec) {
+    group = 'application'
+    description = '포트폴리오 데모: 가상 데이터로 모의 수집 → 검수(HIDDEN 등록) → 명시적 공개 (데모 DB 전용)'
+    classpath = sourceSets.demo.runtimeClasspath
+    mainClass = 'com.manhwanet.ManhwanetApplication'
+    workingDir = projectDir
+    // Gradle 이 자식 출력을 UTF-8 로 읽으므로 한글 안내가 깨지지 않게 맞춘다(Windows 콘솔 코드 페이지와 무관)
+    jvmArgs '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8'
+    doFirst {
+        def step = (project.findProperty('step') ?: 'status').toString()
+        args = ['--spring.profiles.active=local,demo,demo-seed', "--manhwanet.demo.step=${step}"]
+    }
+}
+
 tasks.named('test') {
     useJUnitPlatform()
 }
