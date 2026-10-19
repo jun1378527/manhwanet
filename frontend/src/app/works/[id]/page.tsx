@@ -2,17 +2,19 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
-import { CreditList } from "@/components/CreditList";
 import { WorkRatingSection } from "@/components/ratings/WorkRatingSection";
 import { WorkReviewSection } from "@/components/reviews/WorkReviewSection";
 import { ApiUnavailable } from "@/components/StatusMessage";
-import { WorkTile } from "@/components/WorkTile";
+import { WorkHero } from "@/components/works/WorkHero";
 import { getWork } from "@/lib/api/works";
 import { getSession } from "@/lib/auth/session";
 import { type MyRatingState, getMyRating } from "@/lib/ratings/server";
 import { type MyReviewState, getMyReview, getReviewPage } from "@/lib/reviews/server";
-import { WORK_FORMAT_LABELS, countryLabel, countryName, languageLabel } from "@/lib/works/labels";
-import { isValidWorkId, parseListPage, parseReturnPage, workDetailHref, worksListHref } from "@/lib/works/params";
+import { formatRegisteredDate, isoDateTime } from "@/lib/home/model";
+import { type WorkDetailWithLinks } from "@/lib/works/detail";
+import { countryLabel, languageLabel } from "@/lib/works/labels";
+import { isValidWorkId, parseListPage } from "@/lib/works/params";
+import { resolveReturnQuery, workDetailHrefFor, worksSearchHref } from "@/lib/works/search";
 
 export async function generateMetadata({ params }: PageProps<"/works/[id]">): Promise<Metadata> {
   const { id } = await params;
@@ -25,17 +27,18 @@ export async function generateMetadata({ params }: PageProps<"/works/[id]">): Pr
 
 export default async function WorkDetailPage({ params, searchParams }: PageProps<"/works/[id]">) {
   const { id } = await params;
-  const { from, reviewPage: reviewPageParam } = await searchParams;
-  const fromPage = parseReturnPage(from);
-  const listHref = worksListHref(fromPage);
+  const { from, back, reviewPage: reviewPageParam } = await searchParams;
+  // 목록 복귀 상태: ?back=(같은 출처 /works 주소만, 다시 검증) 또는 이전 방식 ?from=(페이지). 잘못된 값이면 기본 목록
+  const listQuery = resolveReturnQuery(back, from);
+  const listHref = worksSearchHref(listQuery);
 
   if (!isValidWorkId(id)) {
     notFound();
   }
-  // 공개 리뷰 페이지(?reviewPage, 1부터). 잘못된 값·중복 값은 reviewPage 를 뺀 주소로 보낸다(307). from 은 보존한다.
+  // 공개 리뷰 페이지(?reviewPage, 1부터). 잘못된 값·중복 값은 reviewPage 를 뺀 주소로 보낸다(307). 목록 복귀 상태는 보존한다.
   const reviewPage = parseListPage(reviewPageParam);
   if (reviewPage === null) {
-    redirect(workDetailHref(id, fromPage));
+    redirect(workDetailHrefFor(id, listQuery));
   }
   // 작품, 내 별점·내 리뷰(로그인했을 때만), 공개 리뷰 목록을 함께 불러온다.
   // 내 별점·내 리뷰는 사용자별 응답이므로 캐시하지 않는다. 공개 목록은 쿠키 없이 읽는다.
@@ -48,81 +51,62 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
     return (
       <>
         <BackLink href={listHref} />
-        <ApiUnavailable retryHref={workDetailHref(id, fromPage, reviewPage)} />
+        <ApiUnavailable retryHref={workDetailHrefFor(id, listQuery, reviewPage)} />
       </>
     );
   }
 
-  const work = result.data;
-  const alternativeTitles = work.titles.filter((title) => !title.primary);
+  const work = result.data as WorkDetailWithLinks;
+  const myReview = viewer.myReview;
+  const hasMyReview = myReview.status === "loaded" && myReview.review !== null;
+  const registered = formatRegisteredDate(work.createdAt);
 
   return (
     <article className="work-detail">
       <BackLink href={listHref} />
 
-      {/* 작품 정보를 먼저 두고(읽기·탭 순서), 별점·리뷰는 그 뒤에 둔다. 넓은 화면에서는 별점이 오른쪽 열로 간다. */}
-      <header className="work-detail__header">
-        <WorkTile title={work.primaryTitle} format={work.workFormat} size="lg" />
-        <div className="work-detail__heading">
-          <p className="work-detail__badges">
-            <span className="badge">{WORK_FORMAT_LABELS[work.workFormat] ?? work.workFormat}</span>
-            {work.originCountry ? <span className="badge">{countryName(work.originCountry)}</span> : null}
-          </p>
-          <h1 lang={work.primaryTitle.languageCode}>{work.primaryTitle.title}</h1>
-          <section aria-labelledby="credits-heading" className="work-detail__credits">
-            <h2 id="credits-heading" className="visually-hidden">
-              작가
-            </h2>
-            <CreditList credits={work.creators} />
-          </section>
-        </div>
-      </header>
+      {/* 읽기·탭 순서: 작품 정보 → 작품 소개 → 내 별점 → 리뷰. 넓은 화면에서는 내 별점이 오른쪽 열로 간다. */}
+      <WorkHero work={work} hasMyReview={hasMyReview} />
 
       <div className="work-detail__layout">
         <div className="work-detail__info">
-          <section aria-labelledby="description-heading">
-            <h2 id="description-heading">줄거리</h2>
-            {work.description ? (
+          <section className="work-section" aria-labelledby="description-heading">
+            <h2 id="description-heading" className="work-section__title">
+              작품 소개
+            </h2>
+            {work.description && work.description.trim() !== "" ? (
               <p className="work-detail__description">{work.description}</p>
             ) : (
-              <p className="muted">등록된 줄거리가 없습니다.</p>
-            )}
-          </section>
-
-          <section aria-labelledby="titles-heading">
-            <h2 id="titles-heading">다른 제목</h2>
-            {alternativeTitles.length > 0 ? (
-              <ul className="title-list">
-                {alternativeTitles.map((title) => (
-                  <li key={`${title.languageCode}:${title.title}`}>
-                    <span lang={title.languageCode}>{title.title}</span>{" "}
-                    <span className="title-list__lang">{languageLabel(title.languageCode)}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">등록된 다른 제목이 없습니다.</p>
+              <p className="work-section__empty">아직 작품 소개가 등록되지 않았어요.</p>
             )}
             <dl className="work-detail__facts">
               <div>
                 <dt>대표 제목 언어</dt>
                 <dd>{languageLabel(work.primaryTitle.languageCode)}</dd>
               </div>
+              {work.originCountry ? (
+                <div>
+                  <dt>국가</dt>
+                  <dd>{countryLabel(work.originCountry)}</dd>
+                </div>
+              ) : null}
               <div>
-                <dt>국가</dt>
-                <dd>{work.originCountry ? countryLabel(work.originCountry) : "정보 없음"}</dd>
+                <dt>만화넷 등록</dt>
+                <dd>
+                  <time dateTime={isoDateTime(work.createdAt)}>{registered}</time>
+                </dd>
               </div>
             </dl>
           </section>
         </div>
 
-        <div className="work-detail__side">
+        <div className="work-detail__side" id="my-rating">
           <WorkRatingSection
             key={viewerKey}
             workId={work.id}
             initialSummary={work.rating}
             initialMine={myRating}
-            selfHref={workDetailHref(work.id, fromPage, reviewPage)}
+            selfHref={workDetailHrefFor(work.id, listQuery, reviewPage)}
             viewerId={viewer.viewerId}
           />
         </div>
@@ -135,7 +119,7 @@ export default async function WorkDetailPage({ params, searchParams }: PageProps
             initialMine={viewer.myReview}
             initialList={reviewList}
             reviewPage={reviewPage}
-            fromPage={fromPage}
+            listQuery={listQuery}
           />
         </div>
       </div>

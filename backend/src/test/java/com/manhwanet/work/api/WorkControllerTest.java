@@ -17,7 +17,10 @@ import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.response.PageResponse;
 import com.manhwanet.global.security.AuthenticationConfig;
 import com.manhwanet.global.security.WebSecurityConfig;
+import com.manhwanet.work.application.WorkSearchCriteria;
+import com.manhwanet.work.application.WorkSearchService;
 import com.manhwanet.work.application.WorkService;
+import com.manhwanet.work.domain.WorkFormat;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -46,6 +49,48 @@ class WorkControllerTest {
 
     @MockitoBean
     private WorkService workService;
+
+    @MockitoBean
+    private WorkSearchService workSearchService;
+
+    @Test
+    void listWithoutSearchParametersKeepsTheExistingPathAndNeverCallsSearch() throws Exception {
+        given(workService.getWorks(any())).willReturn(new PageResponse<>(List.of(), 0, 20, 0, 0, false));
+
+        mockMvc.perform(get("/api/v1/works").param("q", "   ").param("format", "").param("sort", "id,asc"))
+                .andExpect(status().isOk());
+
+        then(workService).should().getWorks(any());
+        then(workSearchService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void searchParametersUseTheSearchPathWithNormalizedCriteriaAndUnsortedPageable() throws Exception {
+        given(workSearchService.search(any(), any())).willReturn(new PageResponse<>(List.of(), 1, 10, 0, 0, false));
+
+        mockMvc.perform(get("/api/v1/works").param("q", "  달빛 \t 상점 ").param("format", "PAGE_COMIC")
+                        .param("platform", "RIDI").param("order", "ratingCount").param("page", "1").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.page").value(1));
+
+        ArgumentCaptor<WorkSearchCriteria> criteria = ArgumentCaptor.forClass(WorkSearchCriteria.class);
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        then(workSearchService).should().search(criteria.capture(), pageable.capture());
+        assertThat(criteria.getValue()).isEqualTo(new WorkSearchCriteria(
+                "달빛 상점", WorkFormat.PAGE_COMIC, "RIDI", WorkSearchCriteria.Order.RATING_COUNT));
+        assertThat(criteria.getValue().likePattern()).isEqualTo("%달빛 상점%");
+        assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(10);
+        then(workService).should(never()).getWorks(any());
+    }
+
+    @Test
+    void searchRejectsSortTogetherWithSearchParameters() throws Exception {
+        mockMvc.perform(get("/api/v1/works").param("order", "title").param("sort", "id,asc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.fieldErrors[0].field").value("sort"));
+        then(workSearchService).shouldHaveNoInteractions();
+    }
 
     @Test
     void listUsesDefaultPagingAndSort() throws Exception {

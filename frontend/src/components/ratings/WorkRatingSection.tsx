@@ -247,7 +247,7 @@ export function WorkRatingSection({ workId, initialSummary, initialMine, selfHre
 
   return (
     <section className="work-rating" aria-labelledby={`${legendId}-heading`}>
-      <h2 id={`${legendId}-heading`}>별점</h2>
+      <h2 id={`${legendId}-heading`}>내 별점</h2>
       <RatingSummaryLine summary={summary} className="work-rating__summary" />
 
       {mine.status === "anonymous" || mine.status === "expired" ? (

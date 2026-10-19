@@ -385,12 +385,15 @@ CREATE INDEX idx_change_log_entity ON admin_change_log (entity_type, entity_id, 
 ```
 
 - `platformLinks`: `status = ACTIVE`이고 `id_scope ≠ UNKNOWN`인 연결만, 플랫폼 `CLOSED`는 제외. 정렬: `MAIN` → `TRANSLATION` → `SEASON` → `EDITION`, 같은 종류는 플랫폼 이름순.
+  - **구현(2026-10-17 상세 개편, `PublicPlatformLinkService`):** 위 조건에 더해 ① `ageClass = GENERAL`만(S-12, 공개 표시 정책 전 `ADULT`·`UNKNOWN` 비공개) ② 저장된 URL을 **지금의** 플랫폼 규칙(`PlatformUrls`: https·허용 호스트·작품 URL 패턴·외부 ID 일치)으로 다시 검증해 통과한 것만, 정규화한 URL로 ③ 같은 URL은 한 번만 ④ 같은 종류·이름이면 연결 등록 순. 이전된 옛 연결(`MOVED`)은 상태 조건으로 빠지고 이전 대상이 `ACTIVE`면 그 연결이 나옵니다. 응답 항목은 `platformCode`·`platformName`·`url`·`listingKind`·`languageCode`만이며 연결 ID·외부 ID·확인자·확인 시각·원문 등급·메모는 넣지 않습니다. 화면은 https·사용자 정보·포트·프래그먼트를 한 번 더 확인합니다.
+  - 함께 추가: 상세·목록 항목의 `reviewCount`(공개 리뷰 수, 기존 필드 뒤). `officialLinks`·`dataSources`는 아직 구현하지 않았습니다.
 - `dataSources`: 출처 표기용(Wikidata는 권장 표기, MADB는 CC BY 출처 표기 의무). 확인자·시각 등 관리 정보는 공개하지 않습니다.
 - `HIDDEN` 작품: 공개 상세는 404 `WORK_NOT_FOUND`, 목록에서 제외. 내 별점·리뷰 API는 작품이 숨겨져도 내 기록을 지우지 않습니다(조회 정책은 §7).
 
 ### 6.2 화면 (A 디자인 유지)
 
 - 작품 상세의 작품 정보 영역(줄거리 아래)에 **"보러 가기"** 목록: 플랫폼 이름 텍스트 링크(`rel="noopener noreferrer"`, 새 탭), 언어가 다르면 "(한국어판)" 같은 표시. 표지·플랫폼 로고 이미지는 쓰지 않습니다.
+  - **[변경 · 2026-10-17 상세 개편]** 위치를 상단 작품 정보(평가 요약 아래)로 옮겼습니다. 플랫폼 이름 텍스트 버튼, `rel="noopener noreferrer nofollow"`·새 탭·"(새 창, 외부 사이트)" 안내, 종류가 본편이 아니면 "시즌"·"판본"·"번역판", 대표 제목과 언어가 다르면 "(영어판)" 같은 표시, 같은 이름이 둘 이상이면 "네이버웹툰 2"처럼 번호. 로고 이미지는 쓰지 않고, 연결이 없으면 영역을 숨깁니다.
 - 상세 하단에 출처 표기 한 줄: "작품 정보 출처: Wikidata, 文化庁「MADB Lab」(가공)". 실제로 쓴 출처만.
 - 연결이 없으면 영역을 숨깁니다. 빈 상태 문구는 쓰지 않습니다.
 - 키보드 포커스·대비는 기존 링크 규칙을 따릅니다.

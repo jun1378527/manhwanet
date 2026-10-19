@@ -279,6 +279,7 @@ ON CONFLICT ON CONSTRAINT uk_work_reviews_user_work DO NOTHING
 |---|---|---|---|---|
 | GET | `/works/{workId}/reviews?page&size` | 없음 | 200 | 공개 목록 |
 | GET | `/me/reviews/{workId}` | 로그인 | 200 | 내 리뷰. 미작성이면 `review: null` |
+| GET | `/me/reviews?page&size` | 로그인 | 200 | **내 리뷰 목록(2026-10-18, 내 활동 화면).** 본인 리뷰만(세션 사용자), `size` 1~50 기본 20. 정렬: 작성 시각 DESC → id DESC(수정해도 순서 유지). 항목 `{id, workId, available, work, excerpt, excerptTruncated, containsSpoiler, createdAt, updatedAt, edited}` — 본문은 앞 160 코드 포인트(서로게이트 쌍을 자르지 않음)만, `version`·전체 본문은 없음(수정·삭제는 작품 상세의 단건 API). 숨김 작품은 `available: false, work: null`. `X-Expected-User-Id`가 있으면 확인 |
 | POST | `/me/reviews/{workId}` | 로그인 + CSRF | 201, `Location: /api/v1/me/reviews/{workId}` | 작성 |
 | PUT | `/me/reviews/{workId}` | 로그인 + CSRF | 200 | 수정 (전체 교체) |
 | DELETE | `/me/reviews/{workId}?reviewId=&version=` | 로그인 + CSRF | 204 | 삭제. 현재 리뷰가 없으면 204 |
@@ -373,6 +374,7 @@ DELETE /api/v1/me/reviews/21?reviewId=7&version=1
 ### 6.1 배치와 조회
 
 - 작품 상세: 작품 정보 → 별점(**[기존]**) → 내 리뷰 → 리뷰 목록("리뷰 N개") → 크레딧.
+- **[변경 · 2026-10-17 상세 개편]** 상단(표지·제목·다른 제목·작가·형식·평가 요약·플랫폼 바로가기·"별점 남기기"/"리뷰 쓰기" 진입) → 작품 소개 → 내 별점 → 리뷰(내 리뷰 → 리뷰 목록). 넓은 화면은 내 별점이 오른쪽 열, 좁은 화면은 위 순서대로 이어집니다. 상단 평가 요약의 리뷰 수는 공개 응답 `reviewCount`입니다.
 - 서버 렌더링에서 공개 목록(쿠키 전달 없음, `no-store`)과, 로그인했을 때만 내 리뷰(세션 쿠키만 전달, `no-store`)를 작품 조회와 병렬로 읽습니다.
 - 목록 페이지는 상세 쿼리 `reviewPage`(1부터)입니다. 기존 `from`은 유지합니다. 잘못된 값·중복 값은 `reviewPage`를 뺀 주소로 307입니다.
 - 리뷰 목록 조회만 실패하면 작품 상세는 보여 주고 리뷰 영역에만 "리뷰를 불러오지 못했습니다 · 다시 시도"를 표시합니다.
@@ -382,8 +384,8 @@ DELETE /api/v1/me/reviews/21?reviewId=7&version=1
 | 상태 | 표시 |
 |---|---|
 | 비로그인 | "리뷰를 쓰려면 로그인하세요" + 현재 상세로 돌아오는 검증된 `returnTo` |
-| 리뷰 없음 | `textarea`("리뷰 내용"), 글자 수 "0 / 2,000"(코드 포인트), "스포일러 포함" 체크박스, "등록" 버튼 |
-| 리뷰 있음 | 내 본문(접지 않음), 작성·수정 시각, "수정"·"삭제" |
+| 리뷰 없음 | **[변경 · 2026-10-17]** 편집기는 닫힌 채 안내 문장과 "리뷰 쓰기" 버튼만 보입니다(작품 정보보다 큰 폼이 먼저 나오지 않음). "리뷰 쓰기"(또는 상단 진입·주소 `#write-review`)로 `textarea`("리뷰 내용"), 글자 수(코드 포인트), "스포일러 포함" 체크박스, "등록"·"취소"가 열리고 입력란에 포커스가 갑니다. 작성 중인 글이 있을 때 "취소"는 "버리기 / 계속 쓰기"를 한 번 묻습니다 |
+| 리뷰 있음 | 내 본문(접지 않음), 작성·수정 시각, "수정"·"삭제". 상단 진입은 "내 리뷰 보기"(`#my-review`) |
 | 수정 중 | 같은 폼에 기존 값, "수정 저장"·"취소" |
 | 내 리뷰 조회 실패 | "내 리뷰를 불러오지 못했습니다 · 다시 불러오기" (작성 폼을 보여 주지 않음) |
 

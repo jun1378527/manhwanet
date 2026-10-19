@@ -194,8 +194,9 @@ fieldErrors의 field 경로 예: `workFormat`, `titles`, `titles[1].languageCode
 | GET | `/api/v1/creators/{creatorId}` | 작가 단건 조회 | 200 |
 | GET | `/api/v1/creators` | 작가 목록 (페이지) | 200 |
 | POST | `/api/v1/admin/works` | 작품 등록 | 201 + `Location: /api/v1/works/{id}` |
-| GET | `/api/v1/works/{workId}` | 작품 상세 조회 | 200 |
-| GET | `/api/v1/works` | 작품 목록 (페이지) | 200 |
+| GET | `/api/v1/works/{workId}` | 작품 상세 조회. 기존 필드 뒤에 `reviewCount`(공개 리뷰 수)·`platformLinks`(공개 가능한 플랫폼 바로가기, [work-platform-admin-spec.md](work-platform-admin-spec.md) §6.1) | 200 |
+| GET | `/api/v1/works` | 작품 목록 (페이지). 검색·필터·정렬 파라미터는 §5.5. 항목 맨 뒤에 `reviewCount`(별점 순위 응답도 같음) | 200 |
+| GET | `/api/v1/works/filters` | 작품 찾기 필터 선택지 (§5.5) | 200 |
 
 > 작품·작가 관리자 조회·수정(`GET/PUT /api/v1/admin/works/{workId}`, `GET/PUT /api/v1/admin/creators/{creatorId}`)은 #38 에서 추가했습니다. 규칙은 [work-platform-admin-spec.md](work-platform-admin-spec.md) §5.1·§5.2에 있습니다. 수정의 입력 검증은 이 문서 §3·§4의 등록 규칙과 같습니다.
 
@@ -295,6 +296,7 @@ GET /api/v1/works?page=0&size=20&sort=createdAt,desc
 | 요청 내 같은 (creatorId, role) 반복 | 400 | INVALID_INPUT | `creators[1]` |
 | 존재하지 않는 creatorId | 400 | INVALID_INPUT | `creators[0].creatorId` |
 | 잘못된 page / size / sort | 400 | INVALID_INPUT | `page`, `size`, `sort` |
+| 잘못된 q / format / platform / order, 찾기 조건과 sort 동시 사용(§5.5) | 400 | INVALID_INPUT | `q`, `format`, `platform`, `order`, `sort` |
 | 없는 작품·작가 단건 조회 | 404 | WORK_NOT_FOUND / CREATOR_NOT_FOUND | - |
 | 비활성 상태의 등록 API 호출 | 404 | RESOURCE_NOT_FOUND | - |
 | 예상한 유니크 제약 위반(§6.3) | 409 | DUPLICATE_RESOURCE | - |
@@ -304,6 +306,54 @@ GET /api/v1/works?page=0&size=20&sort=createdAt,desc
   "error": { "code": "INVALID_INPUT", "message": "입력값이 올바르지 않습니다.",
              "fieldErrors": [ { "field": "creators[0].creatorId", "reason": "존재하지 않는 작가입니다." } ] } }
 ```
+
+### 5.5 작품 찾기 (검색·필터·정렬)
+
+화면 `/works`(작품 찾기)가 쓰는 조회입니다. 기존 `GET /api/v1/works`에 선택 파라미터를 더했고, 필터 선택지 조회를 새로 두었습니다. 둘 다 익명으로 호출할 수 있습니다.
+
+```http
+GET /api/v1/works?q=한서윤&format=WEBTOON&platform=NAVER_WEBTOON&order=popular&page=0&size=20
+GET /api/v1/works/filters
+```
+
+| 파라미터 | 값 | 규칙 |
+|---|---|---|
+| `q` | 검색어 | 작품의 **모든 제목**(대표·다른 제목)과 참여 작가의 `name`·`originalName` 부분 일치, 대소문자 무시(`ILIKE`). 제어 문자는 공백으로 바꾸고 NFC 정규화 → 연속 공백 하나로 → 앞뒤 공백 제거. 남는 글자가 없으면 조건 없음. 정규화 후 100자(코드 포인트) 초과는 400(`q`). `%`·`_`·`\`는 글자 그대로 찾음(escape) |
+| `format` | `WEBTOON` \| `PAGE_COMIC` | 대소문자 구분. 그 밖은 400(`format`) |
+| `platform` | 플랫폼 코드 | `^[A-Z][A-Z0-9_]{1,29}$`. 형식이 다르면 400(`platform`), 형식은 맞지만 연결이 없으면 빈 결과. **상태가 `ACTIVE`인 연결**이 있는 작품만(종료·이전·미확인 연결은 제외) |
+| `order` | `recent`(기본) \| `popular` \| `ratingCount` \| `reviewCount` \| `rating` \| `title` | 대소문자 무시. 그 밖은 400(`order`). 화면은 `title`을 쓰지 않음(API 에는 남겨 둠) |
+| `page`, `size` | §6.2와 같음 | page ≥ 0, size 1~100, page×size ≤ 2,147,483,647 |
+
+- **호환:** `q`(정규화 후)·`format`·`platform`·`order`가 모두 없거나 빈 값이면 기존 목록 경로를 그대로 탑니다(`sort` 지원, 응답 동일). 하나라도 있으면 찾기 경로이며, 이때 `sort`를 함께 보내면 400(`sort`)입니다. 응답 모양(`PageResponse<WorkSummaryResponse>`)은 기존 목록과 같습니다.
+- **대상:** 전체 공개(`PUBLIC`) 작품입니다. 조건·정렬·건수를 DB 에서 한 번에 계산하고 `page`·`size`로 자릅니다(현재 페이지만 거르지 않음). 숨김(`HIDDEN`) 작품은 제목·작가로 찾히지 않고 건수·필터 선택지에도 들어가지 않습니다.
+- **중복 방지:** 제목·작가·플랫폼 조건은 모두 `EXISTS`로 걸어 작품 행이 늘어나지 않습니다. 같은 플랫폼 연결이 여럿이거나, 같은 이름의 작가 둘이 참여하거나, 제목·작가 둘 다 맞아도 작품은 한 번, 건수도 1입니다.
+- **정렬(모두 고정 동률 기준):**
+
+| order | 화면 이름 | 순서 |
+|---|---|---|
+| `popular` | 인기순 | 최근 30일 동안 별점이나 리뷰를 남기거나 고친(`updated_at`) 이용자 수 DESC(별점과 리뷰를 모두 남겨도 1명) → 전체 별점 수 DESC → 등록 시각 DESC → id DESC |
+| `ratingCount` | 별많은순 | 별점 수 DESC → 평균 DESC → 등록 시각 DESC → id DESC |
+| `reviewCount` | 리뷰많은순 | 리뷰 수 DESC → 별점 수 DESC → 등록 시각 DESC → id DESC |
+| `rating` | 높은평점순 | 평균(소수 첫째 자리 반올림, 별점 순위·화면 표시와 같은 값) DESC → 별점 수 DESC → 등록 시각 DESC → id DESC |
+| `recent` | 최신등록순(기본) | 등록 시각 DESC → id DESC (기존 목록 기본값과 같음) |
+| `title` | (화면 없음) | 대표 제목 소문자의 코드 포인트 순(`COLLATE "C"`) ASC → 대표 제목 ASC → id ASC |
+
+- **값이 없는 작품:** 모든 정렬에 **포함**합니다. 별점·리뷰·최근 활동이 없는 작품은 0(평균은 맨 뒤)으로 보고 뒤에 두며, 그 안에서는 위 동률 기준을 따릅니다. 그래서 정렬을 바꿔도 결과 건수는 같습니다. 홈의 별점 순위(`GET /works/rankings`)는 그대로 별점이 있는 작품만 다룹니다. 화면은 고른 정렬의 기준을 정렬 메뉴 아래에 안내합니다.
+- **인기순 기간:** 30일은 서버 시각 기준(`WorkSearchCriteria.POPULAR_WINDOW_DAYS`)이고, 조회수는 아직 수집하지 않아 쓰지 않습니다. 별점을 지우면 그 활동도 빠집니다.
+- **일관성:** 건수·ID·표시 정보를 같은 REPEATABLE READ 읽기 트랜잭션에서 읽습니다. 범위를 넘는 `page`는 빈 `content`와 실제 `totalElements`를 돌려줍니다.
+- **큰 ID:** `id`·`creatorId`는 JSON 정수 그대로(예: 9007199254740993) 내보내고, 프론트는 무손실 파싱으로 문자열로 다룹니다.
+- **도메인 경계 예외:** 찾기 SQL(`WorkSearchRepository`, 읽기 전용)은 작가·플랫폼 연결·별점 테이블을 SQL 로 직접 읽습니다. 다른 도메인의 Repository·Entity 는 참조하지 않고 쓰기는 하지 않습니다. 검색 전용 도메인(§8)은 아직 두지 않았습니다.
+
+`GET /api/v1/works/filters` 응답:
+
+```json
+{ "success": true,
+  "data": { "platforms": [ { "code": "NAVER_WEBTOON", "name": "네이버웹툰", "workCount": 10 } ] } }
+```
+
+- 공개 작품에 `ACTIVE` 연결이 있는 플랫폼만, 이름 코드 포인트 순(같으면 코드 순)입니다. `workCount`는 연결된 공개 작품 수(작품 기준, 연결이 여럿이어도 1)입니다. 화면은 이 수를 보여 주지 않습니다(다른 조건과 무관한 전체 수이기 때문).
+
+화면(`/works`) URL: `?q=&format=&platform=&sort=popular|ratingCount|reviewCount|rating&page=`(1부터, 생략=최신등록순). 정렬은 한 줄 링크(인기순 · 별많은순 · 리뷰많은순 · 높은평점순 · 최신등록순)이고 이전 `sort=title` 주소는 정렬을 뺀 주소로 보냅니다. 기본값은 생략하고, 화면의 `sort`는 API `order`로 보냅니다. 조건을 바꾸면 첫 페이지로 이동하고, 상세로 갈 때는 목록 주소를 `?back=/works?...`로 넘깁니다(조건 없이 페이지만 다르면 이전과 같은 `?from=N`). 상세는 `back`을 같은 출처의 `/works` 경로인지 검사하고 목록 파라미터 규칙으로 다시 해석해 잘못된 값은 버립니다.
 
 ## 6. 구현 기준
 
@@ -382,6 +432,8 @@ GET /api/v1/works?page=0&size=20&sort=createdAt,desc
 | 슬라이스 | `WorkControllerTest`, `CreatorControllerTest` (`@WebMvcTest`) | 기본 정렬, page·size·sort 400, 404 |
 | 통합 | `AdminApiDisabledWithoutLocalProfileTest`, `AdminApiDisabledByDefaultTest` | 플래그만 켜고 local 프로필이 없을 때, local 프로필만 있고 플래그가 기본값(false)일 때 등록 Controller 미생성·404, 조회 API 동작, local 프로필의 loopback 바인딩 설정 |
 | 통합 | `CreatorApiIntegrationTest`, `WorkApiIntegrationTest` | 등록 성공·정규화, 입력 오류, 없는 작가, 요청 내 중복, 상세·목록, 안정적인 정렬, 페이징 |
+| 통합 | `WorkSearchIntegrationTest` | 작품 찾기(§5.5): 모든 제목·작가 이름·원어 이름 검색, 앞뒤·연속 공백, NFD 입력, `%`·`_`·`\`·따옴표·제어 문자, 숨김 작품의 제목·작가·건수·선택지 제외, ACTIVE 연결만 플랫폼 필터·여러 연결 중복 없음, 형식·조합 필터, 여섯 정렬(인기순 30일 활동·중복 이용자·고친 별점, 리뷰 수 포함)의 동률 기준과 페이지 간 안정성, 값 없는 작품 위치, 페이지 계산·범위 밖, 큰 ID, 기존 목록·순위·상세 호환, 잘못된 파라미터 400 |
+| 통합 | `WorkPublicDetailIntegrationTest` | 상세·목록·찾기·순위의 `reviewCount`와 기존 필드 순서 유지, `platformLinks`의 ACTIVE·ID 단위 확정·GENERAL·플랫폼 종료 제외·URL 재검증·이전 관계·중복 제거·정렬, 관리자 메모·원문 등급·확인자·외부 ID 미노출, 숨김 404, 큰 ID |
 | 통합 | `WorkQueryCountTest` | 데이터(작품·제목·작가 수)를 늘려도 목록·상세 조회의 SQL 실행 수가 변하지 않음 |
 
 - 쿼리 수 검증은 Hibernate Statistics(`test` 프로필에서만 활성화)의 `prepareStatementCount`를 사용합니다. 고정 숫자가 아니라 **데이터가 적을 때와 많을 때의 실행 수가 같은지**를 비교합니다. 2차 캐시는 사용하지 않고, 측정은 HTTP 요청 단위(새 영속성 컨텍스트)로 합니다.
@@ -393,5 +445,5 @@ GET /api/v1/works?page=0&size=20&sort=createdAt,desc
 - 관리자 인증·인가(auth) 적용 후 `@ConditionalOnAdminApiEnabled` 제거
 - 수정·삭제 API와 그에 따른 `updated_at` 갱신 및 대표 제목 교체 규칙
 - 제목 유니코드 정규화(NFC)와 대소문자 무시 중복 판정 여부
-- 작품 목록 필터(형식, 국가), 작가별 작품 목록, 제목 정렬, 검색(search 도메인)
+- 작품 목록 국가 필터, 작가별 작품 목록, 검색 전용 도메인(search)·전문 검색 색인. 형식·플랫폼 필터, 제목 정렬, 작품명·작가명 부분 일치 검색은 §5.5로 구현
 - 실제 JPA flush/commit에서 발생한 유니크 제약 위반이 409로 변환되는 통합 테스트. 제약 이름 허용 목록과 Mockito 단위 테스트는 이미 있다.

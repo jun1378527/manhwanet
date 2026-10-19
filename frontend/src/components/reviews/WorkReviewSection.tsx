@@ -20,7 +20,7 @@ import {
 import type { MyReview } from "@/lib/reviews/model";
 import { type Content, reconcileDelete, reconcileWrite, sameReview } from "@/lib/reviews/reconcile";
 import type { MyReviewState, ReviewPageState } from "@/lib/reviews/server";
-import { workDetailHref } from "@/lib/works/params";
+import { type WorksQuery, workDetailHrefFor } from "@/lib/works/search";
 import { PublicReviewList } from "./PublicReviewList";
 import { ReviewMeta } from "./ReviewMeta";
 
@@ -32,8 +32,8 @@ type Props = {
   initialList: ReviewPageState;
   /** 1부터 시작하는 공개 리뷰 페이지 (URL ?reviewPage) */
   reviewPage: number;
-  /** 작품 목록 복귀 페이지 (URL ?from) */
-  fromPage: number;
+  /** 작품 목록 복귀 상태(검색어·필터·정렬·페이지). 리뷰 페이지 주소에 그대로 이어 붙인다 */
+  listQuery: WorksQuery;
 };
 
 type Mine = MyReviewState | { status: "switched" };
@@ -70,7 +70,7 @@ const CONFLICT_TEXT: Record<Conflict["reason"], string> = {
  * - 작성 중인 글은 메모리(React 상태)에만 둔다. 브라우저 저장소·URL·로그에 남기지 않는다.
  * - 변경이 성공하면 내 리뷰와 공개 목록을 다시 읽고, router.refresh 로 라우터 캐시(뒤로가기 포함)를 갱신한다.
  */
-export function WorkReviewSection({ workId, viewerId, initialMine, initialList, reviewPage, fromPage }: Props) {
+export function WorkReviewSection({ workId, viewerId, initialMine, initialList, reviewPage, listQuery }: Props) {
   const router = useRouter();
   const headingId = useId();
   const listHeadingId = useId();
@@ -90,6 +90,11 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
   const [mine, setMine] = useState<Mine>(initialMine);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [editing, setEditing] = useState(false);
+  /** 아직 리뷰가 없을 때 "리뷰 쓰기"로 편집기를 열었는지. 처음에는 닫혀 있어 작품 정보보다 큰 폼이 먼저 나오지 않는다 */
+  const [composing, setComposing] = useState(false);
+  /** 작성 중인 새 리뷰를 "취소"로 닫으려 할 때 버릴지 묻는 중인지 */
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const discardRef = useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = useState<Content>(EMPTY_DRAFT);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>(NO_FIELD_ERRORS);
   const [conflict, setConflict] = useState<Conflict | null>(null);
@@ -116,7 +121,7 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
   }
 
   const review = mine.status === "loaded" ? mine.review : null;
-  const formOpen = mine.status === "loaded" && (review === null || editing);
+  const formOpen = mine.status === "loaded" && (review === null ? composing : editing);
   const check = checkReviewBody(draft.body);
   const dirty =
     formOpen &&
@@ -125,7 +130,7 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
       : !(check.ok && check.body === review.body && draft.containsSpoiler === review.containsSpoiler));
   const busy = pending !== null;
 
-  const hrefFor = (page: number) => workDetailHref(workId, fromPage, page);
+  const hrefFor = (page: number) => workDetailHrefFor(workId, listQuery, page);
   const selfHref = hrefFor(reviewPage);
 
   // 저장하지 않은 글이 있으면 문서가 내려갈 때(새로고침·탭 닫기) 브라우저 경고를 띄운다.
@@ -214,6 +219,37 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
     }
   }, [confirmingDelete]);
 
+  // 상단 "리뷰 쓰기"(#write-review) 진입: 주소로 들어왔거나 같은 화면의 링크를 누르면 편집기를 연다.
+  // 리뷰가 이미 있으면 formOpen 이 composing 을 보지 않으므로 내 리뷰가 그대로 보인다.
+  useEffect(() => {
+    function open() {
+      setComposing(true);
+      requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+    }
+    function onHash() {
+      if (window.location.hash === "#write-review") {
+        open();
+      }
+    }
+    onHash();
+    function onClick(event: MouseEvent) {
+      const target = event.target;
+      if (event.defaultPrevented || !(target instanceof Element)) {
+        return;
+      }
+      const anchor = target.closest("a");
+      if (anchor instanceof HTMLAnchorElement && anchor.getAttribute("href") === "#write-review") {
+        open();
+      }
+    }
+    document.addEventListener("click", onClick);
+    window.addEventListener("hashchange", onHash);
+    return () => {
+      document.removeEventListener("click", onClick);
+      window.removeEventListener("hashchange", onHash);
+    };
+  }, []);
+
   // ---------- 사용자 확인 ----------
 
   /** 이전 사용자의 글·응답을 지우고 새 사용자 기준으로 다시 렌더링한다 */
@@ -222,6 +258,8 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
     setMine({ status: "switched" });
     setDraft(EMPTY_DRAFT);
     setEditing(false);
+    setComposing(false);
+    setConfirmingDiscard(false);
     setConflict(null);
     setConfirmingDelete(false);
     setLeaveHref(null);
@@ -315,6 +353,9 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
     if (!dirty) {
       setEditing(false);
       setDraft(EMPTY_DRAFT);
+      if (latest !== null) {
+        setComposing(false);
+      }
     }
   }
 
@@ -323,6 +364,8 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
   async function afterChange(successText: string, next: MyReview | null) {
     setMine({ status: "loaded", review: next });
     setEditing(false);
+    setComposing(false);
+    setConfirmingDiscard(false);
     setDraft(EMPTY_DRAFT);
     setConflict(null);
     setConfirmingDelete(false);
@@ -579,6 +622,7 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
     setMine({ status: "loaded", review: conflict.latest });
     setConflict(null);
     setEditing(false);
+    setComposing(conflict.latest === null);
     setDraft(EMPTY_DRAFT);
     setFieldErrors(NO_FIELD_ERRORS);
     setNotice({ tone: "success", text: "최신 리뷰를 불러왔습니다. 작성 중이던 글은 버렸습니다." });
@@ -603,6 +647,13 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
+  /** 아직 리뷰가 없을 때 편집기를 연다(작성 중이던 글이 있으면 그대로 이어서 쓴다) */
+  function startCompose() {
+    setComposing(true);
+    setNotice(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
   function stayOnPage() {
     setLeaveHref(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -618,7 +669,15 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
   }
 
   function cancelEdit() {
+    // 새 리뷰를 쓰는 중이면 글을 바로 지우지 않고 한 번 묻는다
+    if (review === null && dirty && !confirmingDiscard) {
+      setConfirmingDiscard(true);
+      requestAnimationFrame(() => discardRef.current?.focus());
+      return;
+    }
+    setConfirmingDiscard(false);
     setEditing(false);
+    setComposing(false);
     setDraft(EMPTY_DRAFT);
     setFieldErrors(NO_FIELD_ERRORS);
     setConflict(null);
@@ -647,7 +706,8 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
         </div>
       ) : null}
 
-      <div className="my-review">
+      <div className="my-review" id="my-review">
+        <span id="write-review" className="my-review__anchor" aria-hidden="true" />
         <h3>내 리뷰</h3>
         {mine.status === "anonymous" ? (
           <p className="my-review__login">
@@ -723,6 +783,13 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
                   </div>
                 )}
               </div>
+            ) : !formOpen ? (
+              <div className="my-review__empty">
+                <p>아직 이 작품에 남긴 리뷰가 없어요. 다 본 작품이라면 감상을 남겨 주세요.</p>
+                <button type="button" className="button" onClick={startCompose}>
+                  리뷰 쓰기
+                </button>
+              </div>
             ) : (
               <form className="my-review__form" onSubmit={handleSubmit} aria-busy={busy} noValidate>
                 <div className="field">
@@ -782,15 +849,33 @@ export function WorkReviewSection({ workId, viewerId, initialMine, initialList, 
                     {fieldErrors.other}
                   </p>
                 ) : null}
+                {confirmingDiscard ? (
+                  <div className="my-review__confirm" role="group" aria-label="작성 중인 리뷰 버리기 확인">
+                    <p>작성 중인 리뷰를 버릴까요? 버리면 되돌릴 수 없습니다.</p>
+                    <div className="my-review__actions">
+                      <button ref={discardRef} type="button" className="button button--danger" onClick={cancelEdit}>
+                        버리기
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--secondary"
+                        onClick={() => {
+                          setConfirmingDiscard(false);
+                          requestAnimationFrame(() => textareaRef.current?.focus());
+                        }}
+                      >
+                        계속 쓰기
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="my-review__actions">
                   <button type="submit" className="button" disabled={busy || !dirty || conflict !== null}>
                     {pending === "save" ? "저장 중…" : review === null ? "등록" : "수정 저장"}
                   </button>
-                  {review !== null ? (
-                    <button type="button" className="button button--secondary" onClick={cancelEdit} disabled={busy}>
-                      취소
-                    </button>
-                  ) : null}
+                  <button type="button" className="button button--secondary" onClick={cancelEdit} disabled={busy}>
+                    취소
+                  </button>
                 </div>
               </form>
             )}
