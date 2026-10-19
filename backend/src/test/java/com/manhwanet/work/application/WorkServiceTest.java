@@ -10,6 +10,7 @@ import com.manhwanet.audit.application.AdminChangeLog;
 import com.manhwanet.creator.application.CreatorService;
 import com.manhwanet.global.error.BusinessException;
 import com.manhwanet.global.error.ErrorCode;
+import com.manhwanet.platform.application.PublicPlatformLinkService;
 import com.manhwanet.platform.application.WorkListingService;
 import com.manhwanet.platform.domain.ListingRepository;
 import com.manhwanet.provenance.application.ProvenanceQuery;
@@ -40,7 +41,8 @@ class WorkServiceTest {
     private final CreatorService creatorService = mock(CreatorService.class);
     private final WorkService workService = new WorkService(
             workRepository, mock(WorkTitleRepository.class), mock(WorkCreatorRepository.class), creatorService,
-            mock(WorkRatingSummaryQuery.class), mock(WorkListingService.class), mock(ListingRepository.class),
+            mock(WorkRatingSummaryQuery.class), mock(WorkReviewCountQuery.class), mock(PublicPlatformLinkService.class),
+            mock(WorkListingService.class), mock(ListingRepository.class),
             mock(ProvenanceWriter.class), mock(ProvenanceQuery.class), mock(AdminChangeLog.class));
 
     private final CreateWorkRequest request = new CreateWorkRequest(

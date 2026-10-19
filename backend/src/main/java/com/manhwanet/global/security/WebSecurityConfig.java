@@ -41,6 +41,7 @@ public class WebSecurityConfig {
                                 "/api/v1/health",
                                 "/api/v1/works", "/api/v1/works/**",
                                 "/api/v1/creators", "/api/v1/creators/**",
+                                "/api/v1/reviews/*",
                                 "/api/v1/auth/csrf").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/signup", "/api/v1/auth/login").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")

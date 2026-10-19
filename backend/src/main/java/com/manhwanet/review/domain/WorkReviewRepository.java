@@ -1,5 +1,7 @@
 package com.manhwanet.review.domain;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -17,6 +19,11 @@ public interface WorkReviewRepository extends JpaRepository<WorkReview, Long> {
 
     /** 작품별 공개 목록. 정렬은 호출 측 Pageable(created_at DESC, id DESC)로 고정한다. */
     Page<WorkReview> findByWorkId(Long workId, Pageable pageable);
+
+    /** 내 리뷰 목록. 정렬은 호출 측 Pageable(created_at DESC, id DESC)로 고정한다 */
+    Page<WorkReview> findByUserId(Long userId, Pageable pageable);
+
+    long countByUserId(Long userId);
 
     /**
      * 작성. 이미 리뷰가 있으면 아무것도 하지 않고 0을 돌려준다(유니크 위반 예외 없음, 트랜잭션 유지).
@@ -68,5 +75,34 @@ public interface WorkReviewRepository extends JpaRepository<WorkReview, Long> {
         Boolean getContainsSpoiler();
 
         Long getVersion();
+    }
+
+    /**
+     * 최근 공개 리뷰(홈). 작성 시각 DESC, id DESC 로 순서를 고정한다.
+     * 숨김 작품의 리뷰가 개수를 잡아먹지 않도록 작품 공개 상태(works.visibility)를 같은 SQL 에서 거른다.
+     * 작품명 등 표시 정보는 WorkService 가 다시 공개 작품만 골라 붙인다.
+     */
+    @Query(value = """
+            SELECT r.* FROM work_reviews r
+            JOIN works w ON w.id = r.work_id
+            WHERE w.visibility = 'PUBLIC'
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<WorkReview> findRecentOfPublicWorks(@Param("limit") int limit);
+
+    /** 작품별 리뷰 수(리뷰가 있는 작품만). uk_work_reviews_user_work 로 사용자당 한 건이다 */
+    @Query(value = """
+            SELECT work_id AS "workId", COUNT(*) AS "reviewCount"
+            FROM work_reviews
+            WHERE work_id IN (:workIds)
+            GROUP BY work_id
+            """, nativeQuery = true)
+    List<WorkReviewCount> countByWorkIds(@Param("workIds") Collection<Long> workIds);
+
+    interface WorkReviewCount {
+        Long getWorkId();
+
+        Long getReviewCount();
     }
 }

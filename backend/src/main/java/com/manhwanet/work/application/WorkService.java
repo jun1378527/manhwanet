@@ -13,6 +13,7 @@ import com.manhwanet.global.error.InvalidInputException;
 import com.manhwanet.global.error.VersionConflictException;
 import com.manhwanet.global.response.ApiError;
 import com.manhwanet.global.response.PageResponse;
+import com.manhwanet.platform.application.PublicPlatformLinkService;
 import com.manhwanet.platform.application.WorkListingService;
 import com.manhwanet.platform.domain.ListingRepository;
 import com.manhwanet.platform.dto.ListingResponse;
@@ -45,6 +46,7 @@ import com.manhwanet.work.dto.ChangeVisibilityRequest;
 import com.manhwanet.platform.domain.AgeClass;
 import com.manhwanet.platform.domain.ListingRow;
 import com.manhwanet.platform.domain.ListingStatus;
+import com.manhwanet.work.dto.ActivityWorkResponse;
 import com.manhwanet.work.dto.AdminWorkDetailResponse;
 import com.manhwanet.work.dto.CreateWorkRequest;
 import com.manhwanet.work.dto.CreditResponse;
@@ -56,6 +58,7 @@ import com.manhwanet.work.dto.WorkSummaryResponse;
 import com.manhwanet.work.dto.WorkTitleResponse;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -96,6 +99,8 @@ public class WorkService {
     private final WorkCreatorRepository workCreatorRepository;
     private final CreatorService creatorService;
     private final WorkRatingSummaryQuery ratingSummaryQuery;
+    private final WorkReviewCountQuery reviewCountQuery;
+    private final PublicPlatformLinkService publicPlatformLinkService;
     private final WorkListingService workListingService;
     private final ListingRepository listingRepository;
     private final ProvenanceWriter provenanceWriter;
@@ -109,6 +114,8 @@ public class WorkService {
             WorkCreatorRepository workCreatorRepository,
             CreatorService creatorService,
             WorkRatingSummaryQuery ratingSummaryQuery,
+            WorkReviewCountQuery reviewCountQuery,
+            PublicPlatformLinkService publicPlatformLinkService,
             WorkListingService workListingService,
             ListingRepository listingRepository,
             ProvenanceWriter provenanceWriter,
@@ -119,6 +126,8 @@ public class WorkService {
         this.workCreatorRepository = workCreatorRepository;
         this.creatorService = creatorService;
         this.ratingSummaryQuery = ratingSummaryQuery;
+        this.reviewCountQuery = reviewCountQuery;
+        this.publicPlatformLinkService = publicPlatformLinkService;
         this.workListingService = workListingService;
         this.listingRepository = listingRepository;
         this.provenanceWriter = provenanceWriter;
@@ -417,7 +426,59 @@ public class WorkService {
             return PageResponse.of(page, List.of());
         }
 
-        List<Long> workIds = page.getContent().stream().map(Work::getId).toList();
+        return PageResponse.of(page, summarize(page.getContent()));
+    }
+
+    /**
+     * 공개 작품 요약을 주어진 ID 순서대로 돌려준다. 공개가 아니거나 없는 ID 는 건너뛴다.
+     * 다른 도메인의 공개 목록(별점 순위)이 순서를 정하고 표시 정보는 작품 목록과 같은 모양으로 받는다.
+     */
+    @Transactional(readOnly = true)
+    public List<WorkSummaryResponse> getPublicSummaries(List<Long> workIds) {
+        if (workIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Work> works = workRepository.findAllById(workIds).stream()
+                .filter(work -> work.getVisibility() == WorkVisibility.PUBLIC)
+                .collect(Collectors.toMap(Work::getId, Function.identity()));
+        List<Work> ordered = workIds.stream().distinct().map(works::get).filter(Objects::nonNull).toList();
+        return ordered.isEmpty() ? List.of() : summarize(ordered);
+    }
+
+    /**
+     * 내 활동 목록용 공개 작품 정보. 공개가 아니거나 없는 작품은 결과에 없다(숨김 작품 정보는 내보내지 않음).
+     * 작품 수만큼이 아니라 묶음 단위로 조회한다(getPublicSummaries 와 같은 SQL 수).
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, ActivityWorkResponse> findPublicActivityWorks(Collection<Long> workIds) {
+        if (workIds.isEmpty()) {
+            return Map.of();
+        }
+        return getPublicSummaries(List.copyOf(new java.util.LinkedHashSet<>(workIds))).stream()
+                .collect(Collectors.toMap(WorkSummaryResponse::id, ActivityWorkResponse::from));
+    }
+
+    /** 공개 작품의 대표 제목. 숨김·없는 작품은 결과에 없다(최근 리뷰 목록이 작품명을 붙일 때 사용) */
+    @Transactional(readOnly = true)
+    public Map<Long, PrimaryTitleResponse> findPublicPrimaryTitles(Collection<Long> workIds) {
+        if (workIds.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> publicIds = workRepository.findAllById(workIds).stream()
+                .filter(work -> work.getVisibility() == WorkVisibility.PUBLIC)
+                .map(Work::getId)
+                .collect(Collectors.toSet());
+        if (publicIds.isEmpty()) {
+            return Map.of();
+        }
+        return workTitleRepository.findPrimaryTitles(publicIds).stream()
+                .collect(Collectors.toMap(PrimaryTitleView::workId,
+                        view -> new PrimaryTitleResponse(view.title(), view.languageCode())));
+    }
+
+    /** 작품 묶음의 대표 제목·크레딧·작가·별점 집계를 묶음 단위로 일괄 조회해 요약을 만든다(입력 순서 유지) */
+    private List<WorkSummaryResponse> summarize(List<Work> works) {
+        List<Long> workIds = works.stream().map(Work::getId).toList();
         Map<Long, PrimaryTitleView> primaryTitles = workTitleRepository.findPrimaryTitles(workIds).stream()
                 .collect(Collectors.toMap(PrimaryTitleView::workId, Function.identity()));
         Map<Long, List<CreditView>> creditsByWork = workCreatorRepository.findCredits(workIds).stream()
@@ -425,8 +486,9 @@ public class WorkService {
         Map<Long, CreatorSummary> creators = creatorService.getSummaries(
                 creditsByWork.values().stream().flatMap(List::stream).map(CreditView::creatorId).toList());
         Map<Long, RatingSummaryResponse> ratings = ratingSummaryQuery.findByWorkIds(workIds);
+        Map<Long, Long> reviewCounts = reviewCountQuery.countByWorkIds(workIds);
 
-        List<WorkSummaryResponse> content = page.getContent().stream()
+        return works.stream()
                 .map(work -> {
                     PrimaryTitleView primary = primaryTitles.get(work.getId());
                     if (primary == null) {
@@ -443,10 +505,10 @@ public class WorkService {
                             new PrimaryTitleResponse(primary.title(), primary.languageCode()),
                             credits,
                             ratings.getOrDefault(work.getId(), RatingSummaryResponse.EMPTY),
-                            work.getCreatedAt());
+                            work.getCreatedAt(),
+                            reviewCounts.getOrDefault(work.getId(), 0L));
                 })
                 .toList();
-        return PageResponse.of(page, content);
     }
 
     private Work save(Work work) {
@@ -491,7 +553,9 @@ public class WorkService {
                 credits,
                 rating,
                 work.getCreatedAt(),
-                work.getUpdatedAt());
+                work.getUpdatedAt(),
+                reviewCountQuery.countByWorkIds(List.of(work.getId())).getOrDefault(work.getId(), 0L),
+                publicPlatformLinkService.findPublicLinks(work.getId()));
     }
 
     private static CreditResponse toCredit(Long creatorId, CreatorRole role, Map<Long, CreatorSummary> creators) {

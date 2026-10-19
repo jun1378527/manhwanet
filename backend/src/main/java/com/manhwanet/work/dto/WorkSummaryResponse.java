@@ -11,5 +11,7 @@ public record WorkSummaryResponse(
         PrimaryTitleResponse primaryTitle,
         List<CreditResponse> creators,
         RatingSummaryResponse rating,
-        Instant createdAt) {
+        Instant createdAt,
+        /** 공개 리뷰 수(기존 필드 뒤에 덧붙임) */
+        long reviewCount) {
 }
