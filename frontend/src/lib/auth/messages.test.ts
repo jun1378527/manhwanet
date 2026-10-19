@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { parseRetryAfter, type ApiFailure } from "./client-api";
-import { CSRF_FAILED_MESSAGE, UNAVAILABLE_MESSAGE, authBusyMessage, feedbackFor, retryAfterText } from "./messages";
+import { CSRF_FAILED_MESSAGE, UNAVAILABLE_MESSAGE, authBusyMessage, feedbackFor, retryAfterText, retryAtText } from "./messages";
 
 function failure(partial: Partial<ApiFailure>): ApiFailure {
   return {
@@ -90,5 +90,32 @@ describe("Retry-After", () => {
     assert.equal(retryAfterText(61), "약 2분 후");
     assert.equal(retryAfterText(30), "약 30초 후");
     assert.equal(retryAfterText(null), "잠시 후");
+  });
+});
+
+describe("feedback tone", () => {
+  it("구분: 401 은 error, 429·503 AUTH_BUSY 는 wait(Retry-After 포함), 연결 실패는 offline", () => {
+    const denied = feedbackFor(failure({ status: 401, code: "INVALID_CREDENTIALS" }), "login");
+    assert.equal(denied.tone, "error");
+    assert.equal(denied.retryAfterSeconds, null);
+    const limited = feedbackFor(failure({ status: 429, code: "TOO_MANY_LOGIN_ATTEMPTS", retryAfterSeconds: 900 }), "login");
+    assert.equal(limited.tone, "wait");
+    assert.equal(limited.retryAfterSeconds, 900);
+    const busy = feedbackFor(failure({ status: 503, code: "AUTH_BUSY", retryAfterSeconds: 3 }), "signup");
+    assert.equal(busy.tone, "wait");
+    assert.equal(busy.retryAfterSeconds, 3);
+    const offline = feedbackFor({ kind: "unavailable" }, "login");
+    assert.equal(offline.tone, "offline");
+    assert.equal(offline.formError, UNAVAILABLE_MESSAGE);
+    const csrf = feedbackFor(failure({ status: 403, code: "INVALID_CSRF_TOKEN" }), "signup");
+    assert.equal(csrf.tone, "error");
+    assert.equal(csrf.formError, CSRF_FAILED_MESSAGE);
+  });
+
+  it("1분 이상 기다려야 하면 대략의 시각(한국 시간)을 함께 안내한다", () => {
+    const at = Date.parse("2026-10-17T06:00:00Z"); // 15:00 KST
+    assert.equal(retryAtText(900, at), "오후 3:15");
+    assert.equal(retryAtText(59, at), null);
+    assert.equal(retryAtText(null, at), null);
   });
 });

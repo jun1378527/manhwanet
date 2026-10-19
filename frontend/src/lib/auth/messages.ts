@@ -4,11 +4,23 @@
 import type { ApiCallResult } from "./client-api";
 import type { FieldErrors, FieldName } from "./validation";
 
+/**
+ * 폼 전체 안내의 종류(화면 색·아이콘을 고르는 데만 쓴다).
+ * - error: 요청이 처리되었지만 거절됨(401 로그인 실패, 입력·보안 토큰 오류 등)
+ * - wait: 지금은 받지 않음(429 시도 제한, 503 AUTH_BUSY 과부하). Retry-After 를 안내하고 자동으로 다시 보내지 않는다
+ * - offline: 서버에 닿지 못함(연결 실패·시간 초과·예상하지 못한 응답)
+ */
+export type FeedbackTone = "error" | "wait" | "offline";
+
 export type FormFeedback = {
   /** 입력 칸에 연결할 오류 */
   fieldErrors: FieldErrors;
   /** 폼 전체 안내 (입력 칸에 연결할 수 없는 오류) */
   formError: string | null;
+  /** formError 의 종류 */
+  tone: FeedbackTone;
+  /** wait 일 때 서버가 알려 준 Retry-After(초). 없으면 null */
+  retryAfterSeconds: number | null;
 };
 
 const FIELD_NAMES: ReadonlySet<string> = new Set<FieldName>(["email", "nickname", "password"]);
@@ -31,13 +43,13 @@ export function retryAfterText(seconds: number | null): string {
   return `약 ${Math.ceil(seconds / 60)}분 후`;
 }
 
-/**
- * 실패 결과를 입력 칸 오류와 폼 오류로 나눈다.
- * @param context login: 로그인 실패는 이유를 구분하지 않는다. signup: 409 는 이메일 칸 오류로 표시한다.
- */
-export function feedbackFor(result: Exclude<ApiCallResult<unknown>, { kind: "ok" }>, context: "login" | "signup"): FormFeedback {
+/** 응답 코드별 안내 문구(종류·Retry-After 는 feedbackFor 가 붙인다) */
+function baseFeedback(
+  result: Exclude<ApiCallResult<unknown>, { kind: "ok" }>,
+  context: "login" | "signup",
+): Pick<FormFeedback, "fieldErrors" | "formError"> & Partial<FormFeedback> {
   if (result.kind === "unavailable") {
-    return { fieldErrors: {}, formError: UNAVAILABLE_MESSAGE };
+    return { fieldErrors: {}, formError: UNAVAILABLE_MESSAGE, tone: "offline", retryAfterSeconds: null };
   }
 
   switch (result.code) {
@@ -79,4 +91,32 @@ export function feedbackFor(result: Exclude<ApiCallResult<unknown>, { kind: "ok"
       }
       return { fieldErrors: {}, formError: result.message ?? "요청을 처리하지 못했습니다." };
   }
+}
+
+/**
+ * 실패 결과를 입력 칸 오류와 폼 오류로 나눈다.
+ * @param context login: 로그인 실패는 이유를 구분하지 않는다. signup: 409 는 이메일 칸 오류로 표시한다.
+ */
+export function feedbackFor(result: Exclude<ApiCallResult<unknown>, { kind: "ok" }>, context: "login" | "signup"): FormFeedback {
+  const base = baseFeedback(result, context);
+  const waiting = result.kind === "error" && (result.code === "TOO_MANY_LOGIN_ATTEMPTS" || result.code === "AUTH_BUSY");
+  return {
+    fieldErrors: base.fieldErrors,
+    formError: base.formError,
+    tone: base.tone ?? (waiting ? "wait" : "error"),
+    retryAfterSeconds: waiting && result.kind === "error" ? result.retryAfterSeconds : null,
+  };
+}
+
+/**
+ * Retry-After 가 1분 이상이면 다시 시도할 수 있는 대략의 시각을 "오후 3:12" 처럼 돌려준다(한국 시간).
+ * 화면 안내용이며, 이 시각에 자동으로 다시 보내지 않는다.
+ */
+export function retryAtText(retryAfterSeconds: number | null, receivedAt: number): string | null {
+  if (retryAfterSeconds === null || retryAfterSeconds < 60) {
+    return null;
+  }
+  return new Intl.DateTimeFormat("ko-KR", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Seoul" }).format(
+    new Date(receivedAt + retryAfterSeconds * 1000),
+  );
 }

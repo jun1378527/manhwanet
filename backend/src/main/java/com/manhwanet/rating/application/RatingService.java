@@ -5,17 +5,24 @@ import com.manhwanet.global.error.ConstraintViolations;
 import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.error.InvalidInputException;
 import com.manhwanet.global.response.ApiError;
+import com.manhwanet.global.response.PageResponse;
 import com.manhwanet.rating.domain.RatingScore;
 import com.manhwanet.rating.domain.WorkRating;
 import com.manhwanet.rating.domain.WorkRatingRepository;
+import com.manhwanet.rating.dto.MyRatingItemResponse;
 import com.manhwanet.rating.dto.MyRatingResponse;
 import com.manhwanet.rating.dto.RatingRequest;
 import com.manhwanet.work.application.WorkService;
+import com.manhwanet.work.dto.ActivityWorkResponse;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -53,6 +60,34 @@ public class RatingService {
             throw new BusinessException(ErrorCode.WORK_NOT_FOUND);
         }
         return mine.map(RatingService::toResponse).orElseGet(() -> MyRatingResponse.unrated(workId));
+    }
+
+    /**
+     * 내 별점 목록(본인 것만, userId 는 세션에서 얻은 값). 숨김·삭제된 작품의 내 기록도 그대로 보여 주되
+     * 작품 정보는 공개 작품에만 붙인다. 목록과 작품 정보를 같은 스냅샷에서 읽는다.
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PageResponse<MyRatingItemResponse> getMyRatings(Long userId, Pageable pageable) {
+        Page<WorkRating> page = workRatingRepository.findByUserId(userId, pageable);
+        if (page.isEmpty()) {
+            return PageResponse.of(page, List.of());
+        }
+        Map<Long, ActivityWorkResponse> works = workService.findPublicActivityWorks(
+                page.getContent().stream().map(WorkRating::getWorkId).toList());
+        List<MyRatingItemResponse> items = page.getContent().stream()
+                .map(r -> {
+                    ActivityWorkResponse work = works.get(r.getWorkId());
+                    return new MyRatingItemResponse(r.getWorkId(), work != null, work,
+                            RatingScore.fromScoreHalf(r.getScoreHalf()), r.getCreatedAt(), r.getUpdatedAt());
+                })
+                .toList();
+        return PageResponse.of(page, items);
+    }
+
+    /** 내 별점 수(숨김 작품 기록 포함) */
+    @Transactional(readOnly = true)
+    public long countMine(Long userId) {
+        return workRatingRepository.countByUserId(userId);
     }
 
     /**

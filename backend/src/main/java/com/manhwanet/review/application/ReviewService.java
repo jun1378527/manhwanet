@@ -5,24 +5,31 @@ import com.manhwanet.global.error.ConstraintViolations;
 import com.manhwanet.global.error.ErrorCode;
 import com.manhwanet.global.error.InvalidInputException;
 import com.manhwanet.global.response.ApiError;
+import com.manhwanet.global.response.PageResponse;
 import com.manhwanet.review.domain.ReviewBody;
 import com.manhwanet.review.domain.WorkReview;
-import com.manhwanet.review.domain.WorkReviewRepository;
 import com.manhwanet.review.domain.WorkReviewRepository.LockedReview;
+import com.manhwanet.review.domain.WorkReviewRepository;
 import com.manhwanet.review.dto.CreateReviewRequest;
 import com.manhwanet.review.dto.JsonFlag;
 import com.manhwanet.review.dto.JsonInteger;
 import com.manhwanet.review.dto.JsonText;
+import com.manhwanet.review.dto.MyReviewItemResponse;
 import com.manhwanet.review.dto.MyReviewResponse;
 import com.manhwanet.review.dto.ReviewResponse;
 import com.manhwanet.review.dto.UpdateReviewRequest;
 import com.manhwanet.work.application.WorkService;
+import com.manhwanet.work.dto.ActivityWorkResponse;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -64,6 +71,29 @@ public class ReviewService {
         }
         return mine.map(review -> new MyReviewResponse(workId, ReviewResponse.from(review)))
                 .orElseGet(() -> MyReviewResponse.none(workId));
+    }
+
+    /**
+     * 내 리뷰 목록(본인 것만, userId 는 세션에서 얻은 값). 숨김 작품의 내 리뷰도 보존해 보여 주되 작품 정보는 공개 작품에만 붙인다.
+     * 목록과 작품 정보를 같은 스냅샷에서 읽는다.
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PageResponse<MyReviewItemResponse> getMyReviews(Long userId, Pageable pageable) {
+        Page<WorkReview> page = workReviewRepository.findByUserId(userId, pageable);
+        if (page.isEmpty()) {
+            return PageResponse.of(page, List.of());
+        }
+        Map<Long, ActivityWorkResponse> works = workService.findPublicActivityWorks(
+                page.getContent().stream().map(WorkReview::getWorkId).toList());
+        return PageResponse.of(page, page.getContent().stream()
+                .map(r -> MyReviewItemResponse.of(r, works.get(r.getWorkId())))
+                .toList());
+    }
+
+    /** 내 리뷰 수(숨김 작품 기록 포함) */
+    @Transactional(readOnly = true)
+    public long countMine(Long userId) {
+        return workReviewRepository.countByUserId(userId);
     }
 
     /** 작성. 이미 리뷰가 있으면 409 REVIEW_ALREADY_EXISTS 이고 아무것도 바꾸지 않는다. */

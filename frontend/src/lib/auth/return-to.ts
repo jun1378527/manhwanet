@@ -66,3 +66,15 @@ export function loginHref(returnTo: string, options?: { expired?: boolean }): st
 export function signupHref(returnTo: string): string {
   return withReturnTo("/signup", returnTo);
 }
+
+/**
+ * 로그인·가입 화면에 보여 줄 "돌아갈 곳" 이름. 주소를 그대로 보이지 않고 화면 종류만 알려 준다.
+ * value 는 safeReturnTo 로 검증한 내부 경로여야 한다.
+ */
+export function describeReturnTo(value: string): string {
+  const path = value.split(/[?#]/, 1)[0];
+  if (path === "/") return "대문";
+  if (path === "/works") return value === "/works" ? "작품 목록" : "보던 작품 찾기 결과";
+  if (/^\/works\/[^/]+$/.test(path)) return "보던 작품 화면";
+  return "보던 화면";
+}

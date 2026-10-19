@@ -145,6 +145,7 @@ work   ──✗ rating  (work 는 rating 을 import 하지 않음)
 | GET | `/me/ratings/{workId}` | 200 | 내 별점. 평가하지 않았으면 `score: null` |
 | PUT | `/me/ratings/{workId}` | 200 | 등록·수정 통합. 본문 `{"score": 4.5}` |
 | DELETE | `/me/ratings/{workId}` | 204 | 삭제. 평가하지 않은 상태여도 204 |
+| GET | `/me/ratings?page&size` | 200 | **내 별점 목록(2026-10-18, 내 활동 화면).** 본인 기록만(세션 사용자), `size` 1~50 기본 20. 정렬: 마지막 저장 시각(`updated_at`) DESC → id DESC. 항목 `{workId, available, work, score, createdAt, updatedAt}` — `work`(작품명·형식·작가)는 지금 공개 작품에만 있고 숨김 작품은 `available: false, work: null`(내 기록·점수는 보존, 작품 정보는 내보내지 않음). `X-Expected-User-Id`가 있으면 확인(다르면 409). 요약 `GET /me/activity` = `{ratingCount, reviewCount}`(숨김 작품 기록 포함) |
 
 응답 `data` (GET·PUT):
 

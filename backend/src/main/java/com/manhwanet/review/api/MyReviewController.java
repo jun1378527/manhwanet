@@ -2,12 +2,18 @@ package com.manhwanet.review.api;
 
 import com.manhwanet.auth.api.ExpectedUser;
 import com.manhwanet.auth.application.AuthenticatedUser;
+import com.manhwanet.global.pagination.PageableFactory;
 import com.manhwanet.global.response.ApiResponse;
+import com.manhwanet.global.response.PageResponse;
 import com.manhwanet.review.application.ReviewService;
 import com.manhwanet.review.dto.CreateReviewRequest;
+import com.manhwanet.review.dto.MyReviewItemResponse;
 import com.manhwanet.review.dto.MyReviewResponse;
 import com.manhwanet.review.dto.UpdateReviewRequest;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import java.net.URI;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -35,10 +41,32 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/me/reviews")
 public class MyReviewController {
 
+    public static final int DEFAULT_LIST_SIZE = 20;
+    public static final int MAX_LIST_SIZE = 50;
+    /** 작성 시각 DESC, 같으면 id DESC(고정). 수정해도 순서가 바뀌지 않는다 */
+    static final Sort LIST_ORDER = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+
     private final ReviewService reviewService;
 
     public MyReviewController(ReviewService reviewService) {
         this.reviewService = reviewService;
+    }
+
+    /**
+     * 내 리뷰 목록 GET /api/v1/me/reviews?page&size (size 1~50, 기본 20). 본인 기록만, 사용자는 세션에서.
+     * 본문은 앞부분만 담는다. X-Expected-User-Id 가 있으면 세션 사용자와 같은지 확인한다.
+     */
+    @GetMapping
+    public ApiResponse<PageResponse<MyReviewItemResponse>> getMyReviews(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @RequestHeader(name = ExpectedUser.HEADER, required = false) String expectedUserId,
+            @RequestParam(defaultValue = "0") @Min(value = 0, message = "page는 0 이상이어야 합니다.") int page,
+            @RequestParam(defaultValue = "" + DEFAULT_LIST_SIZE)
+            @Min(value = 1, message = "size는 1 이상 50 이하여야 합니다.")
+            @Max(value = MAX_LIST_SIZE, message = "size는 1 이상 50 이하여야 합니다.") int size) {
+        Long userId = ExpectedUser.verify(principal, expectedUserId, false);
+        return ApiResponse.success(reviewService.getMyReviews(userId,
+                PageableFactory.createWithFixedSort(page, size, MAX_LIST_SIZE, LIST_ORDER)));
     }
 
     @GetMapping("/{workId}")

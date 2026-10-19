@@ -13,7 +13,7 @@
 | 영역 | 기술 |
 | --- | --- |
 | Backend | Java 21, Spring Boot 3.5.16, Gradle 8.14.3 (Wrapper), Spring Web, Spring Data JPA, Spring Validation, Flyway, PostgreSQL JDBC Driver, Spring Boot Test |
-| Frontend | Next.js 16.3.8 (App Router), React 19.2.8, TypeScript 5 |
+| Frontend | Next.js 16.3.8 (App Router), React 19.2.8, TypeScript 5, matter-js 0.20.0(홈 배너 물리 효과, 브라우저에서 지연 로드) |
 | Database | PostgreSQL 17 |
 | Infra (로컬) | Docker Compose |
 
@@ -47,10 +47,10 @@ manhwanet/
 ├── frontend/                        # Next.js + TypeScript + App Router
 │   ├── src/app/                     # 화면 (/, /works, /works/[id], /login, /signup) — error / not-found 포함
 │   ├── src/app/api/v1/[...path]/    # 같은 출처 API 프록시 (→ API_BASE_URL)
-│   ├── src/components/              # 크레딧, 페이지 이동, 상태 안내, 로그인 폼·헤더(auth/)
+│   ├── src/components/              # 크레딧, 페이지 이동, 상태 안내, 로그인 폼·헤더(auth/), 작품 찾기 조작부·결과(works/)
 │   ├── src/lib/api/                 # 서버 전용 API 클라이언트, 응답 타입, 무손실 JSON 파서, 프록시 규칙
 │   ├── src/lib/auth/                # 로그인 상태 조회, 브라우저 인증 API(CSRF), returnTo, 입력 검사
-│   ├── src/lib/works/               # URL 파라미터 해석, 표시용 라벨
+│   ├── src/lib/works/               # URL 파라미터 해석, 작품 찾기 URL 상태·복귀 주소 검증(search.ts), 표시용 라벨
 │   └── .env.example
 ├── docker/postgres/init/            # PostgreSQL 최초 기동 시 실행 스크립트 (테스트 DB·데모 DB 생성)
 ├── scripts/demo/                    # 포트폴리오 데모 DB 만들기·초기화 (PowerShell, #67)
@@ -226,9 +226,10 @@ npm run dev
 
 | 경로 | 화면 |
 | --- | --- |
-| `/` | 첫 화면, 작품 목록으로 이동 |
-| `/works?page=N` | 작품 목록 (대표 제목, 작품 형식, 작가 크레딧, 20개씩 페이지 이동). `page`는 **1부터** 시작하며 생략하면 1페이지 |
-| `/works/{id}?from=N&reviewPage=M` | 작품 상세 (대표·다른 제목, 작가 역할, 국가, 줄거리, 별점, 리뷰). `from`은 "작품 목록으로" 링크가 돌아갈 목록 페이지, `reviewPage`는 공개 리뷰 페이지(1부터, 10개씩) |
+| `/` | 대문. PC는 장르 메뉴(왼쪽)+안내 배너(물리 효과), 모바일은 배너 아래 장르 칩. 장르는 "전체"만 작품 목록으로 연결하고 나머지는 준비 중(비활성). 작품 영역: 평점순·평가 많은 순(전체 공개 작품 순위, `GET /works/rankings`)·최근 등록(사이트 등록 시각 기준) 탭, 카드는 상세로 연결, 표지는 가상 데모 작품만 데모 표지이고 그 밖에는 "표지 없음". 최근 리뷰 6건(`GET /reviews/recent`, 스포일러 본문은 펼칠 때 `GET /reviews/{id}`로 받음). 배너는 8초 자동 넘김(정지·이전·다음·선택), 움직임 줄이기 설정에서는 정적 화면. 라이선스 고지: `frontend/THIRD_PARTY_NOTICES.md` |
+| `/works?q=&format=&platform=&sort=&page=N` | 작품 찾기. 전체 공개 작품에서 작품명·작가명 검색(`q`), 작품 형식(`format`: `WEBTOON`·`PAGE_COMIC`)·플랫폼(`platform`: 공개 작품에 지금 연결이 있는 플랫폼만) 필터, 정렬(`sort`: `popular` 인기순=최근 30일 별점·리뷰 참여 이용자 수, `ratingCount` 별많은순, `reviewCount` 리뷰많은순, `rating` 높은평점순, 생략=최신등록순)을 백엔드가 처리하고 대문과 같은 카드로 20개씩 보여 줌. 정렬은 한 줄 링크로 나란히 두고 고른 정렬의 기준을 안내. 값이 없는 작품도 모든 정렬에 포함되어 뒤에 나옴. 상태는 모두 URL 에 두고 조건을 바꾸면 첫 페이지로 이동, 새로고침·뒤로가기로 복원. 모바일은 검색·정렬을 바로 보이고 필터는 접어 둠. `page`는 **1부터**, 기본값은 생략 |
+| `/works/{id}?back=/works?...&reviewPage=M` | 작품 상세. 상단: 표지(가상 데모 작품만 데모 표지, 그 밖에는 표지 없음)·형식·제목·다른 제목·작가·평가 요약(평균·별점 참여 수·리뷰 수)·플랫폼 바로가기(공개 가능한 연결만, 새 창)·"별점 남기기"/"리뷰 쓰기" 진입 → 작품 소개(없으면 빈 상태) → 내 별점 → 리뷰(내 리뷰는 "리뷰 쓰기"를 눌러야 편집기가 열림, 리뷰가 있으면 내 리뷰와 수정·삭제). `back`은 "작품 목록으로" 링크가 돌아갈 작품 찾기 주소(같은 출처의 `/works` 경로만 허용, 목록 파라미터 규칙으로 다시 검증). 조건 없이 페이지만 다르면 이전과 같은 `from=N`. `reviewPage`는 공개 리뷰 페이지(1부터, 10개씩) |
+| `/me?tab=reviews&page=N` | 내 활동(로그인 필요, 비로그인은 로그인 후 이 주소로 복귀). 닉네임·남긴 별점 수·쓴 리뷰 수, "내 별점"(작품명·작가·점수·평가 시각, 상세 이동)·"내 리뷰"(작품명·본문 일부·스포일러는 기본 접힘·작성/수정 시각, "상세에서 수정하기") 탭과 탭별 20개씩 페이지 이동. 숨김 작품의 내 기록은 "이용할 수 없는 작품"으로 표시. 헤더의 닉네임이 이 화면으로 가는 링크. 다른 탭에서 계정이 바뀌면 문서를 다시 받아 이전 사용자의 기록을 지움 |
 | `/login?returnTo=경로` | 로그인 (이메일·비밀번호). 성공하면 `returnTo`, 없으면 `/works`로 이동 |
 | `/signup?returnTo=경로` | 회원가입 (이메일·닉네임·비밀번호). 가입과 동시에 로그인됨 |
 
@@ -245,7 +246,7 @@ npm run dev
 - 캐시 정책: 모든 조회는 `fetch(..., { cache: "no-store" })`로 요청마다 Backend에서 새로 읽습니다. `/works`, `/works/[id]`는 동적 렌더링(`ƒ`)이며 응답에 `Cache-Control: private, no-cache, no-store`가 붙습니다. 새로 등록한 작품은 새로고침하면 바로 보입니다.
 - 세션 쿠키를 읽기 때문에 모든 화면이 동적 렌더링(`ƒ`)입니다.
 - 상태 화면: 등록된 작품 없음, 범위 밖 페이지, API 연결 실패(다시 시도 링크), 없는 작품(404 안내)
-- 정상 목록·상세는 HTTP 200입니다. 없는 작품과 잘못된 작품 ID는 404이고, 잘못된 `page`와 중복 `page`는 `/works`로 307 리다이렉트됩니다. 없는 작품 화면에는 `noindex`가 붙습니다.
+- 정상 목록·상세는 HTTP 200입니다. 없는 작품과 잘못된 작품 ID는 404이고, 작품 찾기의 잘못된 값·중복 값(`page`·`sort`·`format`·`platform`·`q`)과 앞뒤 공백이 있는 검색어는 그 값을 고치거나 뺀 정규 주소로 307 리다이렉트됩니다(예: 잘못된 `page`만 있으면 `/works`). 기본값만 적은 주소(`page=1`, `sort=recent`, 빈 값)는 그대로 둡니다. 없는 작품 화면에는 `noindex`가 붙습니다.
 - 작품 `id`와 작가 `creatorId`는 JSON 숫자로 오지만, 서버에서 원문 십진수 문자열로 읽어 링크에 사용합니다. 페이지 번호와 개수는 기존 숫자 타입입니다.
 
 프로덕션 빌드: `npm run build && npm run start`
@@ -309,10 +310,14 @@ cd backend
 | `RatingConcurrencyTest`, `RatingRollbackTest` | 동시 PUT, PUT·DELETE 경쟁(트랜잭션 순서 재현 포함), 롤백, FK 위반 → 404 | O |
 | `ReviewBodyTest` | 리뷰 본문 정규화: 코드 포인트 경계(이모지·조합 문자), 앞뒤 공백, 줄바꿈 LF 통일, NUL·제어 문자 거절 | X |
 | `WorkReviewMigrationTest` | V5 적용, 유니크·본문 길이·공백·version·시각 CHECK, FK(작품 CASCADE, 사용자 RESTRICT), NUL 저장 불가 | O |
+| `MyActivityIntegrationTest` | 내 활동: 본인 기록만·다른 사용자 격리, 정렬(마지막 저장/작성 시각 → id)과 페이지 간 안정성, 숨김 작품 기록 보존·작품 정보 비노출, 본문 앞부분(서로게이트 쌍)·스포일러·수정 표시, 비로그인 401·page/size 검증·예상 사용자 409·no-store, 큰 ID | O |
 | `ReviewApiIntegrationTest` | 공개 목록·내 리뷰 GET·POST·PUT·DELETE, 보안 규칙(익명 공개 GET·`/me` 401·CSRF 403), 입력 검증, `reviewId`+`version` 충돌, 삭제 후 재작성, USER·ADMIN 격리, 정렬·페이지, 공개 필드, 큰 ID·version | O |
 | `ReviewConcurrencyTest`, `ReviewRollbackTest` | 동시 작성, 같은 버전 동시 수정, 수정·삭제 경쟁, 잠금 대기 중 재작성(트랜잭션 순서 재현), 롤백, FK 위반 → 404 | O |
 | `ReviewQueryCountTest` | 리뷰·작성자 수가 늘어도 공개 목록 SQL 수가 같음, 닉네임 일괄 조회 1회, 빈 페이지는 닉네임 조회 생략 (N+1 회귀) | O |
 | `ReviewExpectedUserIntegrationTest` | `X-Expected-User-Id` 필수·형식, 계정 전환 뒤 요청(새 세션·유효 CSRF)의 POST·PUT·DELETE·GET 409 `USER_MISMATCH` 와 무변경, 입력 검증보다 먼저 확인, 큰 사용자 ID 정확 비교 (#22) | O |
+| `WorkSearchIntegrationTest` | 작품 찾기: 모든 제목·작가명·원어명 검색과 공백·NFD·특수문자·제어 문자, 숨김 작품의 제목·작가·건수·선택지 제외, ACTIVE 연결만 플랫폼 필터·여러 연결 중복 없음, 형식·조합 필터, 여섯 정렬(인기순·리뷰많은순 포함) 동률 기준과 페이지 간 안정성, 값 없는 작품 위치, 페이지 계산, 큰 ID, 기존 목록·순위·상세 호환, 잘못된 파라미터 400 | O |
+| `WorkPublicDetailIntegrationTest` | 공개 상세·목록 확장: `reviewCount`(상세·목록·찾기·순위, 기존 필드 순서 유지), `platformLinks` 노출 조건(상태·ID 단위·등급·플랫폼 종료·URL 재검증·이전 관계·중복)과 정렬, 관리자 정보 미노출, 숨김 404, 큰 ID | O |
+| `HomeQueriesIntegrationTest` | 홈 공개 조회: 별점 순위 평균(반올림)·평가 수·동률(등록 시각·id) 순서와 페이지 간 안정성, page·size·totalElements 계산, 숨김 작품 제외, 작품 목록과 같은 응답 모양·기존 목록 호환, 잘못된 파라미터 400 / 최근 리뷰 최신순·동률 id·숨김 작품 리뷰 제외(개수 유지)·size 제한·공개 필드만, 리뷰 한 건 조회 404, 공개 경로 범위 | O |
 
 - 통합 테스트는 테스트 DB 이름이 `_test`로 끝나고 `DB_NAME`과 다른지 확인한 뒤, `TRUNCATE` 직전에 `current_database()`가 그 이름과 같은지 다시 확인합니다. 이름이 같거나, 비어 있거나, 접미사가 없으면 정리를 거절합니다. `_test` 접미사는 안전장치이며, 그 DB의 과거 용도를 증명하지는 않습니다.
 - 등록 API 통합 테스트는 ADMIN 사용자와 CSRF 토큰으로 요청합니다(spring-security-test).
@@ -392,8 +397,9 @@ npm run build
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | GET | `/api/v1/health` | 애플리케이션·DB 상태 |
-| GET | `/api/v1/works` | 작품 목록 (`page`, `size`, `sort`) |
-| GET | `/api/v1/works/{workId}` | 작품 상세 |
+| GET | `/api/v1/works` | 작품 목록 (`page`, `size`, `sort`). 작품 찾기 선택 파라미터 `q`(제목·작가명 부분 일치, 최대 100자), `format`, `platform`(ACTIVE 연결), `order=recent\|popular\|ratingCount\|reviewCount\|rating\|title`(인기순은 최근 30일 별점·리뷰 참여 이용자 수). 찾기 파라미터가 없으면 기존과 같은 동작, 있으면 `sort`와 함께 쓸 수 없음(400). 값이 없는 작품은 뒤에 포함. 모든 정렬은 등록 시각·id(제목순은 id)로 동률을 고정. 숨김 작품 제외 ([work-creator-spec.md](docs/work-creator-spec.md) §5.5) |
+| GET | `/api/v1/works/filters` | 작품 찾기 필터 선택지: 공개 작품에 ACTIVE 연결이 있는 플랫폼 `{code, name, workCount}` |
+| GET | `/api/v1/works/{workId}` | 작품 상세. 기존 필드 뒤에 `reviewCount`, `platformLinks`(ACTIVE·ID 단위 확정·GENERAL 연결, 종료 플랫폼 제외, 현재 URL 규칙으로 재검증, `{platformCode, platformName, url, listingKind, languageCode}`만) |
 | GET | `/api/v1/creators` | 작가 목록 (`page`, `size`, `sort`) |
 | GET | `/api/v1/creators/{creatorId}` | 작가 상세 |
 | GET | `/api/v1/auth/csrf` | CSRF 토큰 쿠키(`XSRF-TOKEN`) 발급 |
@@ -404,11 +410,17 @@ npm run build
 | GET | `/api/v1/me/ratings/{workId}` | 내 별점 (로그인 필요). 평가하지 않았으면 `score: null` |
 | PUT | `/api/v1/me/ratings/{workId}` | 내 별점 등록·수정 `{"score": 4.5}` (0.5~5.0, 0.5 단위). 헤더 `X-Expected-User-Id` 필수 |
 | DELETE | `/api/v1/me/ratings/{workId}` | 내 별점 삭제 (204, 반복 가능). 헤더 `X-Expected-User-Id` 필수 |
+| GET | `/api/v1/me/ratings?page&size` | 내 별점 목록 (로그인 필요, `size` 1~50 기본 20, 마지막 저장 시각 DESC → id DESC). 숨김 작품은 `available: false, work: null` |
+| GET | `/api/v1/me/activity` | 내 활동 요약 `{ratingCount, reviewCount}` (로그인 필요) |
 | GET | `/api/v1/works/{workId}/reviews` | 작품별 공개 리뷰 목록 (`page`, `size` 1~50 기본 10, 작성 시각 최신순) |
+| GET | `/api/v1/works/rankings?order=rating\|ratingCount&page&size` | 공개 작품 별점 순위(익명 허용, `size` 1~50 기본 20). 별점이 하나 이상 있는 공개 작품만, 숨김 작품 제외. 평균순: 평균(소수 첫째 자리 HALF_UP) DESC → 별점 수 DESC → 등록 시각 DESC → id DESC. 평가 많은 순: 별점 수 DESC → 평균 DESC → 등록 시각 DESC → id DESC. 응답 모양은 작품 목록과 같고 `totalElements`는 순위 대상 작품 수. 잘못된 `order`는 400 |
+| GET | `/api/v1/reviews/recent?size` | 최근 공개 리뷰(익명 허용, `size` 1~20 기본 6, 작성 시각 DESC → id DESC). 숨김 작품의 리뷰·작품 정보는 넣지 않음. 항목: `id`, `work{id, primaryTitle}`, `author{nickname}`, `body`, `containsSpoiler`, `createdAt`, `updatedAt`, `edited` |
+| GET | `/api/v1/reviews/{reviewId}` | 공개 리뷰 한 건(익명 허용, 항목 모양은 최근 리뷰와 같음). 숨김 작품의 리뷰·없는 리뷰는 404 `REVIEW_NOT_FOUND` |
 | GET | `/api/v1/me/reviews/{workId}` | 내 리뷰 (로그인 필요). 작성하지 않았으면 `review: null` |
 | POST | `/api/v1/me/reviews/{workId}` | 내 리뷰 작성 `{"body", "containsSpoiler"}` (201, 이미 있으면 409) |
 | PUT | `/api/v1/me/reviews/{workId}` | 내 리뷰 수정 `{"reviewId", "version", "body", "containsSpoiler"}` (불일치 409) |
 | DELETE | `/api/v1/me/reviews/{workId}?reviewId=&version=` | 내 리뷰 삭제 (204, 리뷰가 없어도 204, 불일치 409) |
+| GET | `/api/v1/me/reviews?page&size` | 내 리뷰 목록 (로그인 필요, `size` 1~50 기본 20, 작성 시각 DESC → id DESC, 본문 앞 160자만). 숨김 작품은 `available: false, work: null` |
 
 - 내 리뷰 POST·PUT·DELETE 와 내 별점 PUT·DELETE 는 헤더 `X-Expected-User-Id`(화면을 렌더링한 사용자 ID, 십진수 문자열)가 필수입니다. 이 요청의 로그인 사용자와 다르면 409 `USER_MISMATCH` 로 아무것도 바꾸지 않습니다(계정 전환 중 다른 계정에 반영되는 것을 막음). 작성자·별점 소유자는 항상 세션 사용자입니다. 값은 일치 확인에만 씁니다.
 | POST | `/api/v1/admin/works` | 작품 등록 (ADMIN). `evidence` 필수(제목·크레딧, 줄거리가 있으면 줄거리), `listings`·`externalIds`·`links`·`reason` 선택. 응답은 관리자용 상세 |

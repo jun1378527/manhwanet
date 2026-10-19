@@ -2,10 +2,16 @@ package com.manhwanet.rating.api;
 
 import com.manhwanet.auth.api.ExpectedUser;
 import com.manhwanet.auth.application.AuthenticatedUser;
+import com.manhwanet.global.pagination.PageableFactory;
 import com.manhwanet.global.response.ApiResponse;
+import com.manhwanet.global.response.PageResponse;
 import com.manhwanet.rating.application.RatingService;
+import com.manhwanet.rating.dto.MyRatingItemResponse;
 import com.manhwanet.rating.dto.MyRatingResponse;
 import com.manhwanet.rating.dto.RatingRequest;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -15,6 +21,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -30,10 +37,32 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/me/ratings")
 public class MyRatingController {
 
+    public static final int DEFAULT_LIST_SIZE = 20;
+    public static final int MAX_LIST_SIZE = 50;
+    /** 마지막으로 저장한 시각 DESC, 같으면 id DESC(고정) */
+    static final Sort LIST_ORDER = Sort.by(Sort.Order.desc("updatedAt"), Sort.Order.desc("id"));
+
     private final RatingService ratingService;
 
     public MyRatingController(RatingService ratingService) {
         this.ratingService = ratingService;
+    }
+
+    /**
+     * 내 별점 목록 GET /api/v1/me/ratings?page&size (size 1~50, 기본 20). 본인 기록만, 사용자는 세션에서.
+     * X-Expected-User-Id 가 있으면 세션 사용자와 같은지 확인한다(다르면 409 USER_MISMATCH).
+     */
+    @GetMapping
+    public ApiResponse<PageResponse<MyRatingItemResponse>> getMyRatings(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @RequestHeader(name = ExpectedUser.HEADER, required = false) String expectedUserId,
+            @RequestParam(defaultValue = "0") @Min(value = 0, message = "page는 0 이상이어야 합니다.") int page,
+            @RequestParam(defaultValue = "" + DEFAULT_LIST_SIZE)
+            @Min(value = 1, message = "size는 1 이상 50 이하여야 합니다.")
+            @Max(value = MAX_LIST_SIZE, message = "size는 1 이상 50 이하여야 합니다.") int size) {
+        Long userId = ExpectedUser.verify(principal, expectedUserId, false);
+        return ApiResponse.success(ratingService.getMyRatings(userId,
+                PageableFactory.createWithFixedSort(page, size, MAX_LIST_SIZE, LIST_ORDER)));
     }
 
     @GetMapping("/{workId}")
